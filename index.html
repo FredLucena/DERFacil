@@ -553,12 +553,6 @@
 <div class="toast-wrap" id="toastWrap"></div>
 
 <header>
-  <button class="hbtn" id="btnOpenToolbar" title="Abrir ferramentas">
-    <svg viewBox="0 0 20 20"><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="5" x2="17" y2="5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="10" x2="17" y2="10"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="15" x2="17" y2="15"/></svg>
-  </button>
-  <button class="hbtn" id="btnOpenPanel" title="Abrir propriedades">
-    <svg viewBox="0 0 20 20"><rect class="ic-stroke" fill="none" stroke="currentColor" stroke-width="1.6" x="2.5" y="2.5" width="15" height="15" rx="2.5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" x1="7" y1="2.5" x2="7" y2="17.5"/></svg>
-  </button>
   <div class="brand">
     <span class="mark" id="brandMark" title="Sobre o DER Fácil">DER Fácil</span>
     <select id="modeSelect" class="mode-select" title="Alternar entre modelagem conceitual e lógica">
@@ -603,6 +597,16 @@
       </button>
     </div>
   </div>
+  <!-- Botões que abrem as gavetas de ferramentas/propriedades no celular (escondidos no
+       desktop, veja a media query em @media (max-width: 880px) acima). Ficam por último no
+       cabeçalho -- logo depois de "Baixar projeto" -- para não empurrar o nome do projeto e
+       os outros botões para baixo antes deles no layout empilhado do celular. -->
+  <button class="hbtn" id="btnOpenToolbar" title="Abrir ferramentas">
+    <svg viewBox="0 0 20 20"><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="5" x2="17" y2="5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="10" x2="17" y2="10"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="15" x2="17" y2="15"/></svg>
+  </button>
+  <button class="hbtn" id="btnOpenPanel" title="Abrir propriedades">
+    <svg viewBox="0 0 20 20"><rect class="ic-stroke" fill="none" stroke="currentColor" stroke-width="1.6" x="2.5" y="2.5" width="15" height="15" rx="2.5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" x1="7" y1="2.5" x2="7" y2="17.5"/></svg>
+  </button>
   <input type="file" id="fileInput" accept="application/json,.json" hidden>
 </header>
 <div class="drawer-backdrop" id="drawerBackdrop"></div>
