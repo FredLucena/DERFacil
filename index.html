@@ -489,6 +489,19 @@
     .autosave-note{ display:none; }
     header input#projectName{ min-width:0; flex:1 1 80px; }
 
+    /* Ordem dos botões no cabeçalho do celular, da esquerda para a direita (o restante do
+       cabeçalho -- marca, nome do projeto -- fica antes deles, na ordem 0 padrão): Novo
+       projeto, Abrir projeto, Baixar projeto, Modo claro/escuro, Tela cheia, Barra esquerda
+       (ferramentas) e Barra direita (propriedades). Só vale para este layout de celular --
+       no desktop a ordem visual continua sendo a ordem natural do HTML. */
+    #btnNew{ order:1; }
+    #btnOpen{ order:2; }
+    .dl-menu-wrap{ order:3; }
+    #btnTheme{ order:4; }
+    #btnFullscreen{ order:5; }
+    #btnOpenToolbar{ order:6; }
+    #btnOpenPanel{ order:7; }
+
     aside.toolbar, aside.panel-wrap{
       position:fixed; top:0; bottom:0; z-index:400;
       width:min(85vw, 320px); max-width:320px;
