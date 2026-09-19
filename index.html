@@ -571,10 +571,6 @@
     <svg viewBox="0 0 20 20" id="fullscreenIcon"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4"/></svg>
     <span id="fullscreenLabel">Tela cheia</span>
   </button>
-  <button class="hbtn" id="btnLegend" title="Guia de notação">
-    <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="10" y="14" text-anchor="middle" font-size="11" font-family="Georgia,serif" fill="currentColor">?</text></svg>
-    Notação
-  </button>
   <button class="hbtn" id="btnNew">Novo projeto</button>
   <button class="hbtn" id="btnOpen">Abrir projeto</button>
   <div class="dl-menu-wrap" id="dlMenuWrap">
@@ -4717,36 +4713,6 @@ document.getElementById("btnTheme").addEventListener("click", function(){
   });
   updateBtn();
 })();
-
-/* ---------- legenda de notação ---------- */
-document.getElementById("btnLegend").addEventListener("click", function(){
-  if (mode === "logical"){ showLogicalLegend(); return; }
-  var backdrop = document.createElement("div");
-  backdrop.className = "modal-backdrop";
-  backdrop.innerHTML =
-    '<div class="modal-box">' +
-    '<h2>Notação (estilo Chen / BrModelo)</h2>' +
-    '<p>Guia rápido dos símbolos usados no diagrama entidade-relacionamento.</p>' +
-    '<div class="legend-grid">' +
-      legendRow('<rect x="4" y="4" width="60" height="30" rx="4" fill="var(--entity-fill)" stroke="var(--entity-ink)" stroke-width="1.6"/>', "Entidade", "Um conjunto de objetos com existência própria.") +
-      legendRow('<rect x="4" y="4" width="60" height="30" rx="4" fill="var(--entity-fill)" stroke="var(--entity-ink)" stroke-width="1.6"/><rect x="9" y="9" width="50" height="20" rx="2" fill="none" stroke="var(--entity-ink)" stroke-width="1.3"/>', "Entidade fraca", "Depende de outra entidade para existir; ligada por um relacionamento identificador.") +
-      legendRow('<polygon points="34,3 66,18 34,33 2,18" fill="var(--relationship-fill)" stroke="var(--relationship-ink)" stroke-width="1.6"/>', "Relacionamento", "Associação entre duas ou mais entidades.") +
-      legendRow('<polygon points="34,3 66,18 34,33 2,18" fill="var(--relationship-fill)" stroke="var(--relationship-ink)" stroke-width="1.6"/><polygon points="34,9 58,18 34,27 10,18" fill="none" stroke="var(--relationship-ink)" stroke-width="1.3"/>', "Relac. identificador", "Liga uma entidade fraca à entidade da qual ela depende.") +
-      legendRow('<text x="34" y="19" text-anchor="middle" font-size="12.5" font-weight="500" font-family="Public Sans, sans-serif" fill="var(--attribute-ink)">simples</text>', "Atributo simples", "Propriedade atômica de uma entidade ou relacionamento — só o nome, sem elipse ao redor.") +
-      legendRow('<text x="34" y="19" text-anchor="middle" font-size="12.5" font-weight="500" text-decoration="underline" font-family="Public Sans, sans-serif" fill="var(--attribute-ink)">chave</text>', "Atributo-chave", "Identifica cada ocorrência de forma única (nome sublinhado).") +
-      legendRow('<ellipse cx="34" cy="18" rx="30" ry="15" fill="var(--attribute-fill)" stroke="var(--attribute-ink)" stroke-width="1.5"/><ellipse cx="34" cy="18" rx="23" ry="10" fill="none" stroke="var(--attribute-ink)" stroke-width="1.3"/>', "Atributo multivalorado", "Pode ter mais de um valor para a mesma ocorrência.") +
-      legendRow('<ellipse cx="34" cy="18" rx="30" ry="15" fill="var(--attribute-fill)" stroke="var(--attribute-ink)" stroke-width="1.5" stroke-dasharray="4 3"/>', "Atributo derivado", "Calculado a partir de outros dados (borda tracejada).") +
-      legendRow('<ellipse cx="34" cy="10" rx="22" ry="9" fill="var(--attribute-fill)" stroke="var(--attribute-ink)" stroke-width="1.4"/><line x1="20" y1="17" x2="10" y2="29" stroke="var(--attribute-ink)" stroke-width="1.2"/><line x1="48" y1="17" x2="58" y2="29" stroke="var(--attribute-ink)" stroke-width="1.2"/><text x="10" y="33" text-anchor="middle" font-size="9.5" font-family="Public Sans, sans-serif" fill="var(--attribute-ink)">sub1</text><text x="58" y="33" text-anchor="middle" font-size="9.5" font-family="Public Sans, sans-serif" fill="var(--attribute-ink)">sub2</text>', "Atributo composto", "Formado por sub-atributos conectados a ele (cada sub-atributo simples aparece como texto).") +
-      legendRow('<polygon points="34,3 62,32 6,32" fill="var(--accent-fill)" stroke="var(--accent-ink)" stroke-width="1.6"/><text x="34" y="26" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" font-weight="600" fill="var(--accent-ink)">PD</text>', "Generalização/Especialização", "Superclasse acima, subclasses abaixo. T/P = cobertura total/parcial; D/S = disjunta/sobreposta.") +
-      legendRow('<line x1="6" y1="18" x2="62" y2="18" stroke="var(--ink-soft)" stroke-width="1.4"/><rect x="20" y="10" width="28" height="16" rx="4" fill="var(--surface)" stroke="var(--border)"/><text x="34" y="21" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink)">(1,N)</text>', "Cardinalidade (mín,máx)", "Participação mínima e máxima da entidade no relacionamento.") +
-      legendRow('<rect x="4" y="4" width="60" height="28" rx="3" fill="var(--note-fill)" stroke="var(--note-ink)" stroke-width="1.4" stroke-dasharray="3 2"/><line x1="10" y1="14" x2="52" y2="14" stroke="var(--note-ink)" stroke-width="1.2"/><line x1="10" y1="21" x2="40" y2="21" stroke="var(--note-ink)" stroke-width="1.2"/>', "Anotação", "Nota livre para comentários — não é parte da notação Entidade-Relacionamento e não se conecta a outros elementos.") +
-    '</div>' +
-    '<div class="modal-actions"><button data-a="close" class="primary">Fechar</button></div>' +
-    '</div>';
-  document.body.appendChild(backdrop);
-  backdrop.addEventListener("click", function(e){ if (e.target === backdrop) backdrop.remove(); });
-  backdrop.querySelector('[data-a="close"]').addEventListener("click", function(){ backdrop.remove(); });
-});
 
 /* ---------- sobre / marca ---------- */
 var APP_VERSION = "1.0";
