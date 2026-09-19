@@ -215,7 +215,7 @@
   .grid-size-row input[type=number]{ -moz-appearance:textfield; }
 
   .canvas-wrap{ position:relative; flex:1; overflow:hidden; background:var(--bg); }
-  svg#stage{ width:100%; height:100%; display:block; user-select:none; -webkit-user-select:none; cursor:grab; }
+  svg#stage{ width:100%; height:100%; display:block; user-select:none; -webkit-user-select:none; cursor:grab; touch-action:none; }
   svg#stage:active{ cursor:grabbing; }
   svg#stage.mode-connect{ cursor:crosshair; }
   svg#stage.mode-place{ cursor:copy; }
@@ -468,6 +468,55 @@
     width:min(90vw, 660px); height:auto; display:block;
     background:#000;
   }
+
+  /* ---------- botões de abrir as gavetas (só existem/aparecem no layout de celular) ---------- */
+  #btnOpenToolbar, #btnOpenPanel{ display:none; }
+
+  /* ---------- fundo escurecido atrás das gavetas no celular ---------- */
+  .drawer-backdrop{
+    display:none; position:fixed; inset:0; background:rgba(20,16,8,.4); z-index:390;
+  }
+  .drawer-backdrop.visible{ display:block; }
+
+  /* ---------- layout de celular: barra de ferramentas e painel de propriedades viram
+     gavetas que deslizam por cima do quadro, em vez de ficarem lado a lado com ele (não
+     cabem lado a lado numa tela de celular). Abrem pelos botões no cabeçalho (ou, no painel
+     de propriedades, sozinho ao selecionar algo no quadro) e fecham tocando fora ou no X. */
+  @media (max-width: 880px){
+    #btnOpenToolbar, #btnOpenPanel{ display:inline-flex; }
+
+    header{ padding:8px 10px; gap:6px; }
+    .autosave-note{ display:none; }
+    header input#projectName{ min-width:0; flex:1 1 80px; }
+
+    aside.toolbar, aside.panel-wrap{
+      position:fixed; top:0; bottom:0; z-index:400;
+      width:min(85vw, 320px); max-width:320px;
+      box-shadow:0 8px 30px -6px rgba(0,0,0,.35);
+      transition:transform .22s ease; border:none;
+    }
+    aside.toolbar{ left:0; transform:translateX(-105%); }
+    aside.panel-wrap{ right:0; transform:translateX(105%); }
+    /* Anula o recolhimento por hover do desktop -- no celular a visibilidade é controlada
+       só pela classe "drawer-open" abaixo, nunca por :hover (que não existe de verdade
+       no toque) nem pelo checkbox "Fixar" (escondido logo abaixo). */
+    aside.toolbar.collapsed, aside.toolbar.collapsed:hover,
+    aside.panel-wrap.collapsed, aside.panel-wrap.collapsed:hover{ width:min(85vw, 320px); }
+    aside.toolbar.drawer-open{ transform:translateX(0); }
+    aside.panel-wrap.drawer-open{ transform:translateX(0); }
+
+    .toolbar-pin-row, .panel-pin-row{ display:none; }
+
+    /* Alvos de toque maiores, para dedo em vez de cursor de mouse. */
+    .hbtn{ padding:9px 13px; min-height:40px; }
+    .tbtn{ padding:10px 8px; min-height:44px; }
+    .dl-menu-item{ padding:11px 9px; }
+    .dl-menu{ width:min(85vw, 260px); }
+    .zoom-ctl button{ width:42px; height:42px; font-size:18px; }
+    .fmt-btn{ width:36px; height:36px; }
+    .grid-size-row button{ width:30px; height:30px; }
+    .legend-btn-wrap .hbtn, #btnAbout{ min-height:40px; }
+  }
 </style>
 
 <div class="splash-overlay" id="splashOverlay">
@@ -504,6 +553,12 @@
 <div class="toast-wrap" id="toastWrap"></div>
 
 <header>
+  <button class="hbtn" id="btnOpenToolbar" title="Abrir ferramentas">
+    <svg viewBox="0 0 20 20"><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="5" x2="17" y2="5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="10" x2="17" y2="10"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="15" x2="17" y2="15"/></svg>
+  </button>
+  <button class="hbtn" id="btnOpenPanel" title="Abrir propriedades">
+    <svg viewBox="0 0 20 20"><rect class="ic-stroke" fill="none" stroke="currentColor" stroke-width="1.6" x="2.5" y="2.5" width="15" height="15" rx="2.5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" x1="7" y1="2.5" x2="7" y2="17.5"/></svg>
+  </button>
   <div class="brand">
     <span class="mark" id="brandMark" title="Sobre o DER Fácil">DER Fácil</span>
     <select id="modeSelect" class="mode-select" title="Alternar entre modelagem conceitual e lógica">
@@ -550,6 +605,7 @@
   </div>
   <input type="file" id="fileInput" accept="application/json,.json" hidden>
 </header>
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
 
 <main>
   <aside class="toolbar" id="toolbarWrap">
@@ -851,6 +907,7 @@ function loadPrefs(){
 // (efeito puramente em CSS, com :hover) ou selecionar algum elemento no quadro (aqui, via JS,
 // toda vez que a seleção muda) a exibe de novo.
 function updatePanelPin(){
+  if (mobileLayoutMQ.matches) return; // no celular quem manda é a gaveta, não o "Fixar"
   panelPinChk.checked = panelPinned;
   var hasSelection = (selectedNodeIds.size + selectedEdgeIds.size) > 0;
   panelWrapEl.classList.toggle("collapsed", !panelPinned && !hasSelection);
@@ -863,6 +920,7 @@ panelPinChk.addEventListener("change", function(){
 
 // Mesmo recurso na barra de ferramentas à esquerda (ver .toolbar.collapsed no CSS).
 function updateToolbarPin(){
+  if (mobileLayoutMQ.matches) return;
   toolbarPinChk.checked = toolbarPinned;
   var hasSelection = (selectedNodeIds.size + selectedEdgeIds.size) > 0;
   toolbarWrapEl.classList.toggle("collapsed", !toolbarPinned && !hasSelection);
@@ -871,6 +929,57 @@ toolbarPinChk.addEventListener("change", function(){
   toolbarPinned = toolbarPinChk.checked;
   savePrefs();
   updateToolbarPin();
+});
+
+// ---------- gavetas no layout de celular ----------
+// Numa tela de celular, a barra de ferramentas e o painel de propriedades não cabem ao lado
+// do quadro (ver o "aside.toolbar"/"aside.panel-wrap" dentro do @media (max-width:880px) no
+// <style>) -- em vez disso, viram gavetas escondidas fora da tela por padrão, que deslizam por
+// cima do quadro quando abertas por um botão no cabeçalho, e fecham tocando fora delas (no
+// fundo escurecido) ou ao escolher uma ferramenta.
+var mobileLayoutMQ = window.matchMedia("(max-width: 880px)");
+var drawerBackdropEl = document.getElementById("drawerBackdrop");
+var toolbarInnerEl = document.getElementById("toolbarInner");
+
+function closeAllDrawers(){
+  toolbarWrapEl.classList.remove("drawer-open");
+  panelWrapEl.classList.remove("drawer-open");
+  drawerBackdropEl.classList.remove("visible");
+}
+function openToolbarDrawer(){
+  panelWrapEl.classList.remove("drawer-open");
+  toolbarWrapEl.classList.add("drawer-open");
+  drawerBackdropEl.classList.add("visible");
+}
+function openPanelDrawer(){
+  toolbarWrapEl.classList.remove("drawer-open");
+  panelWrapEl.classList.add("drawer-open");
+  drawerBackdropEl.classList.add("visible");
+}
+document.getElementById("btnOpenToolbar").addEventListener("click", function(){
+  if (toolbarWrapEl.classList.contains("drawer-open")) closeAllDrawers();
+  else openToolbarDrawer();
+});
+document.getElementById("btnOpenPanel").addEventListener("click", function(){
+  if (panelWrapEl.classList.contains("drawer-open")) closeAllDrawers();
+  else openPanelDrawer();
+});
+drawerBackdropEl.addEventListener("click", closeAllDrawers);
+// Tocar num botão de ferramenta fecha a gaveta sozinha -- depois de escolher o que adicionar
+// (ou uma ação como "Excluir selecionado"), o próximo toque já é no quadro, e a gaveta só
+// atrapalharia continuando aberta por cima dele. Os botões +/- do espaçamento da grade ficam
+// de fora -- ajustar a grade costuma precisar de vários toques seguidos.
+toolbarInnerEl.addEventListener("click", function(e){
+  if (!mobileLayoutMQ.matches) return;
+  if (e.target.closest(".grid-size-ctl")) return;
+  if (e.target.closest("button")) closeAllDrawers();
+});
+// Se o layout deixar de ser de celular (ex.: girar o aparelho ou redimensionar a janela),
+// garante que nenhuma gaveta fique "aberta" por engano quando o layout lado a lado voltar.
+if (mobileLayoutMQ.addEventListener) mobileLayoutMQ.addEventListener("change", closeAllDrawers);
+else if (mobileLayoutMQ.addListener) mobileLayoutMQ.addListener(closeAllDrawers);
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape") closeAllDrawers();
 });
 
 // Lista de tipos de dados disponíveis nos combo box das colunas do modelo lógico — salva à parte
@@ -2479,7 +2588,59 @@ function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey
   showToast('Atributo criado e conectado a "' + (target.name || "") + '".');
 }
 
+// ---------- toque com dois dedos no quadro (pinça para dar zoom) ----------
+// O arraste com um dedo só já funciona sozinho: o gesto de clicar-e-arrastar abaixo usa
+// Pointer Events, que o navegador já unifica entre mouse e toque, então arrastar formas ou
+// fazer panorâmica com um dedo já funciona sem nenhum código extra. O que não existia é dar
+// zoom com dois dedos (pinça), já que hoje o zoom só reage à roda do mouse -- por isso
+// rastreamos aqui, à parte, os pontos de toque ativos no quadro; assim que o segundo dedo
+// encosta, cancelamos o gesto de um dedo que porventura já estivesse rolando (a variável
+// "activeStageGestureAbort" abaixo, preenchida pelo próprio gesto de um dedo) para que os
+// dois não fiquem brigando pelo mesmo "view", e passamos a interpretar o movimento dos dois
+// dedos como pinça, reaproveitando o mesmo "zoomBy" usado pela roda do mouse e pelos botões
+// de +/-.
+var touchPointers = new Map();
+var activeStageGestureAbort = null;
+var pinchLastDist = null;
+function touchPointsArray(){ return Array.from(touchPointers.values()); }
+function touchDistance(p1, p2){ return Math.hypot(p1.x - p2.x, p1.y - p2.y); }
+function touchMidpoint(p1, p2){ return { x:(p1.x + p2.x)/2, y:(p1.y + p2.y)/2 }; }
+function updatePinch(){
+  var pts = touchPointsArray();
+  if (pts.length < 2){ pinchLastDist = null; return; }
+  var p1 = pts[0], p2 = pts[1];
+  var dist = touchDistance(p1, p2);
+  if (pinchLastDist !== null && dist > 1){
+    var mid = touchMidpoint(p1, p2);
+    var midSvg = screenToSvg(mid.x, mid.y);
+    zoomBy(pinchLastDist / dist, midSvg.x, midSvg.y);
+  }
+  pinchLastDist = dist;
+}
+document.addEventListener("pointermove", function(ev){
+  if (ev.pointerType !== "touch" || !touchPointers.has(ev.pointerId)) return;
+  touchPointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  if (touchPointers.size >= 2) updatePinch();
+});
+function endStageTouch(ev){
+  if (ev.pointerType !== "touch") return;
+  touchPointers.delete(ev.pointerId);
+  if (touchPointers.size < 2) pinchLastDist = null;
+}
+document.addEventListener("pointerup", endStageTouch);
+document.addEventListener("pointercancel", endStageTouch);
+
 stageEl.addEventListener("pointerdown", function(e){
+  if (e.pointerType === "touch"){
+    touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touchPointers.size >= 2){
+      // Chegou o 2º dedo: encerra o gesto de 1 dedo que estava em andamento (se algum) e
+      // deixa a partir daqui só a pinça (tratada pelos listeners acima) cuidar do zoom.
+      if (activeStageGestureAbort){ activeStageGestureAbort(); activeStageGestureAbort = null; }
+      pinchLastDist = touchDistance(touchPointsArray()[0], touchPointsArray()[1]);
+      return;
+    }
+  }
   if (e.button !== 0 && e.button !== 1) return;
   var isPanGesture = e.button === 1 || spaceHeld;
   // Clicar e arrastar numa área vazia do quadro move a tela (panorâmica), igual ao botão do
@@ -2491,6 +2652,7 @@ stageEl.addEventListener("pointerdown", function(e){
   var startSvg = screenToSvg(e.clientX, e.clientY);
   var moved = false;
   var pointerId = e.pointerId;
+  var aborted = false;
   // Assim como no arraste de nós, evitamos setPointerCapture aqui: capturar o ponteiro
   // no <svg> e depois liberá-lo faz o Chrome cancelar (pointercancel) o próximo gesto de
   // arraste que usar o mesmo pointerId — inclusive um clique-e-arraste num nó logo em
@@ -2501,8 +2663,16 @@ stageEl.addEventListener("pointerdown", function(e){
     marqueeEl.setAttribute("visibility", "visible");
   }
 
+  activeStageGestureAbort = function(){
+    aborted = true;
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onUp);
+    if (doMarquee) marqueeEl.setAttribute("visibility", "hidden");
+  };
+
   function onMove(ev){
-    if (ev.pointerId !== pointerId) return;
+    if (aborted || ev.pointerId !== pointerId) return;
     var dx = ev.clientX - startClient.x, dy = ev.clientY - startClient.y;
     if (!moved && Math.hypot(dx,dy) > 4) moved = true;
     if (!moved) return;
@@ -2517,10 +2687,12 @@ stageEl.addEventListener("pointerdown", function(e){
     }
   }
   function onUp(ev){
+    if (aborted) return;
     if (ev && ev.pointerId !== pointerId) return;
     document.removeEventListener("pointermove", onMove);
     document.removeEventListener("pointerup", onUp);
     document.removeEventListener("pointercancel", onUp);
+    activeStageGestureAbort = null;
     if (doMarquee) marqueeEl.setAttribute("visibility", "hidden");
     if (!moved){
       if (pendingAdd){
@@ -3156,6 +3328,10 @@ function updatePanel(){
   updatePanelPin();
   updateToolbarPin();
   var nCount = selectedNodeIds.size, eCount = selectedEdgeIds.size;
+  // No celular, selecionar algo no quadro já abre a gaveta de propriedades sozinha -- editar
+  // é o motivo mais comum de ter selecionado algo, então poupa o toque extra no botão do
+  // cabeçalho. Ela continua fechando só quando o professor tocar fora ou escolher outra coisa.
+  if (mobileLayoutMQ.matches && (nCount > 0 || eCount > 0)) openPanelDrawer();
   if (nCount === 0 && eCount === 0){
     if (mode === "logical"){
       panelEl.innerHTML =
