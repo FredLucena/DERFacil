@@ -125,6 +125,11 @@
   header input#projectName:focus{ outline:none; border-color:var(--select); background:var(--surface-2); }
   .spacer{ flex:1; min-width:8px; }
   .autosave-note{ font-size:11.5px; color:var(--ink-soft); font-family:var(--font-mono); white-space:nowrap; }
+  /* No desktop este agrupamento não existe visualmente -- os botões dentro dele continuam
+     participando do layout flex do <header> como se estivessem soltos ali, exatamente como
+     antes de agrupá-los numa <div> (só o fizemos para poder tratá-los como uma faixa única no
+     celular, veja a media query abaixo). */
+  .header-actions{ display:contents; }
   .hbtn{
     display:inline-flex; align-items:center; gap:6px;
     background:var(--surface-2); border:1px solid var(--border); border-radius:7px;
@@ -489,11 +494,24 @@
     .autosave-note{ display:none; }
     header input#projectName{ min-width:0; flex:1 1 80px; }
 
-    /* Ordem dos botões no cabeçalho do celular, da esquerda para a direita (o restante do
-       cabeçalho -- marca, nome do projeto -- fica antes deles, na ordem 0 padrão): Novo
-       projeto, Abrir projeto, Baixar projeto, Modo claro/escuro, Tela cheia, Barra esquerda
-       (ferramentas) e Barra direita (propriedades). Só vale para este layout de celular --
-       no desktop a ordem visual continua sendo a ordem natural do HTML. */
+    /* A faixa de botões (Novo projeto, Abrir projeto, Baixar projeto, Modo claro/escuro,
+       Tela cheia, Barra esquerda e Barra direita) vira uma única linha própria -- a segunda
+       linha do cabeçalho, logo abaixo da marca/nome do projeto -- em vez de ficar solta no
+       fluxo do <header> e quebrar em mais de uma linha. "flex-basis:100%" força a quebra de
+       linha bem no início dela (empurra a faixa inteira para a linha seguinte à da marca), e
+       "flex-wrap:nowrap" + "overflow-x:auto" garantem que todos os botões fiquem nessa mesma
+       linha, com rolagem horizontal em vez de quebrar para uma terceira linha caso não caibam
+       de uma vez na largura da tela. */
+    .header-actions{
+      display:flex; flex-wrap:nowrap; flex-basis:100%; order:1;
+      gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch;
+      padding-bottom:2px; scrollbar-width:thin;
+    }
+    .header-actions > .hbtn, .header-actions > .dl-menu-wrap{ flex-shrink:0; }
+
+    /* Ordem dos botões dentro da faixa, da esquerda para a direita: Novo projeto, Abrir
+       projeto, Baixar projeto, Modo claro/escuro, Tela cheia, Barra esquerda (ferramentas) e
+       Barra direita (propriedades). */
     #btnNew{ order:1; }
     #btnOpen{ order:2; }
     .dl-menu-wrap{ order:3; }
@@ -576,46 +594,49 @@
   <input id="projectName" type="text" value="" spellcheck="false">
   <span class="autosave-note" id="autosaveNote"></span>
   <div class="spacer"></div>
-  <button class="hbtn" id="btnTheme" title="Mudar para o modo escuro">
-    <svg viewBox="0 0 20 20"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M16.5 12.4A7 7 0 0 1 7.6 3.5a7 7 0 1 0 8.9 8.9Z"/></svg>
-    Modo escuro
-  </button>
-  <button class="hbtn" id="btnFullscreen" title="Entrar em tela cheia">
-    <svg viewBox="0 0 20 20" id="fullscreenIcon"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4"/></svg>
-    <span id="fullscreenLabel">Tela cheia</span>
-  </button>
-  <button class="hbtn" id="btnNew">Novo projeto</button>
-  <button class="hbtn" id="btnOpen">Abrir projeto</button>
-  <div class="dl-menu-wrap" id="dlMenuWrap">
-    <button class="hbtn" id="btnSave" aria-haspopup="true" aria-expanded="false">
-      Baixar projeto
-      <svg viewBox="0 0 10 6" width="10" height="6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <!-- No desktop este agrupamento é invisível (display:contents -- ver regra ".header-actions"
+       mais acima no <style>), então os botões continuam soltos na mesma linha do cabeçalho,
+       exatamente como antes. No celular ele vira uma faixa própria, colocada sozinha numa
+       segunda linha (com rolagem horizontal caso não caibam todos de uma vez, em vez de
+       quebrar para uma terceira linha) -- ver a media query em @media (max-width: 880px). -->
+  <div class="header-actions" id="headerActions">
+    <button class="hbtn" id="btnTheme" title="Mudar para o modo escuro">
+      <svg viewBox="0 0 20 20"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M16.5 12.4A7 7 0 0 1 7.6 3.5a7 7 0 1 0 8.9 8.9Z"/></svg>
+      Modo escuro
     </button>
-    <div class="dl-menu" id="dlMenu" hidden>
-      <button class="dl-menu-item" data-fmt="json">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/></svg>
-        <span><strong>JSON</strong><small>Arquivo do projeto, para reabrir e continuar editando depois</small></span>
+    <button class="hbtn" id="btnFullscreen" title="Entrar em tela cheia">
+      <svg viewBox="0 0 20 20" id="fullscreenIcon"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4"/></svg>
+      <span id="fullscreenLabel">Tela cheia</span>
+    </button>
+    <button class="hbtn" id="btnNew">Novo projeto</button>
+    <button class="hbtn" id="btnOpen">Abrir projeto</button>
+    <div class="dl-menu-wrap" id="dlMenuWrap">
+      <button class="hbtn" id="btnSave" aria-haspopup="true" aria-expanded="false">
+        Baixar projeto
+        <svg viewBox="0 0 10 6" width="10" height="6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button class="dl-menu-item" data-fmt="jpg">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="16" height="14" rx="1.6"/><circle cx="6.6" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M2 14l4.5-4.5L10 13l3-3 5 4.5"/></svg>
-        <span><strong>JPG</strong><small>Imagem do diagrama atual</small></span>
-      </button>
-      <button class="dl-menu-item" data-fmt="pdf">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/><text x="10" y="15" text-anchor="middle" font-size="6.5" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">PDF</text></svg>
-        <span><strong>PDF</strong><small>Diagrama atual em um documento PDF</small></span>
-      </button>
+      <div class="dl-menu" id="dlMenu" hidden>
+        <button class="dl-menu-item" data-fmt="json">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/></svg>
+          <span><strong>JSON</strong><small>Arquivo do projeto, para reabrir e continuar editando depois</small></span>
+        </button>
+        <button class="dl-menu-item" data-fmt="jpg">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="16" height="14" rx="1.6"/><circle cx="6.6" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M2 14l4.5-4.5L10 13l3-3 5 4.5"/></svg>
+          <span><strong>JPG</strong><small>Imagem do diagrama atual</small></span>
+        </button>
+        <button class="dl-menu-item" data-fmt="pdf">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/><text x="10" y="15" text-anchor="middle" font-size="6.5" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">PDF</text></svg>
+          <span><strong>PDF</strong><small>Diagrama atual em um documento PDF</small></span>
+        </button>
+      </div>
     </div>
+    <button class="hbtn" id="btnOpenToolbar" title="Abrir ferramentas">
+      <svg viewBox="0 0 20 20"><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="5" x2="17" y2="5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="10" x2="17" y2="10"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="15" x2="17" y2="15"/></svg>
+    </button>
+    <button class="hbtn" id="btnOpenPanel" title="Abrir propriedades">
+      <svg viewBox="0 0 20 20"><rect class="ic-stroke" fill="none" stroke="currentColor" stroke-width="1.6" x="2.5" y="2.5" width="15" height="15" rx="2.5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" x1="7" y1="2.5" x2="7" y2="17.5"/></svg>
+    </button>
   </div>
-  <!-- Botões que abrem as gavetas de ferramentas/propriedades no celular (escondidos no
-       desktop, veja a media query em @media (max-width: 880px) acima). Ficam por último no
-       cabeçalho -- logo depois de "Baixar projeto" -- para não empurrar o nome do projeto e
-       os outros botões para baixo antes deles no layout empilhado do celular. -->
-  <button class="hbtn" id="btnOpenToolbar" title="Abrir ferramentas">
-    <svg viewBox="0 0 20 20"><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="5" x2="17" y2="5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="10" x2="17" y2="10"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" x1="3" y1="15" x2="17" y2="15"/></svg>
-  </button>
-  <button class="hbtn" id="btnOpenPanel" title="Abrir propriedades">
-    <svg viewBox="0 0 20 20"><rect class="ic-stroke" fill="none" stroke="currentColor" stroke-width="1.6" x="2.5" y="2.5" width="15" height="15" rx="2.5"/><line class="ic-stroke" stroke="currentColor" stroke-width="1.6" x1="7" y1="2.5" x2="7" y2="17.5"/></svg>
-  </button>
   <input type="file" id="fileInput" accept="application/json,.json" hidden>
 </header>
 <div class="drawer-backdrop" id="drawerBackdrop"></div>
