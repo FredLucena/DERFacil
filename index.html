@@ -138,24 +138,36 @@
   .hbtn:hover{ background:var(--border-soft); }
   .hbtn svg{ width:15px; height:15px; flex-shrink:0; }
 
-  /* Menu de opções de formato do botão "Baixar projeto" (JSON / JPG / PDF) */
+  /* Menu do botão "Projeto" (Novo / Abrir / Salvar) -- "Salvar" abre um segundo painel
+     (JSON / JPG / PDF) dentro do mesmo menu, sem precisar de um flyout lateral (que poderia
+     não caber na tela no celular): ver .dl-menu-panel e o botão "Voltar" (.dl-menu-back). */
   .dl-menu-wrap{ position:relative; }
-  .dl-menu-wrap #btnSave svg{ width:10px; height:6px; }
+  .dl-menu-caret{ width:10px; height:6px; flex-shrink:0; }
   .dl-menu{
     position:absolute; top:calc(100% + 6px); right:0; z-index:250;
     background:var(--surface); border:1px solid var(--border); border-radius:9px;
     box-shadow:var(--shadow); padding:6px; width:250px;
-    display:flex; flex-direction:column; gap:2px;
+    overflow:hidden;
   }
+  .dl-menu-panel{ display:flex; flex-direction:column; gap:2px; }
   .dl-menu-item{
     display:flex; align-items:flex-start; gap:9px; text-align:left;
     background:transparent; border:none; border-radius:7px; padding:8px 9px; width:100%;
   }
   .dl-menu-item:hover{ background:var(--surface-2); }
   .dl-menu-item svg{ width:19px; height:19px; flex-shrink:0; margin-top:1px; }
-  .dl-menu-item span{ display:flex; flex-direction:column; gap:1px; }
+  .dl-menu-item span{ display:flex; flex-direction:column; gap:1px; flex:1; min-width:0; }
   .dl-menu-item strong{ font-size:13px; font-weight:600; }
   .dl-menu-item small{ font-size:11.5px; color:var(--ink-soft); line-height:1.35; }
+  /* seta que indica que "Salvar" abre um segundo painel (submenu) */
+  .dl-menu-item .dl-menu-caret-right{
+    width:8px; height:8px; flex-shrink:0; align-self:center; margin-left:auto; color:var(--ink-soft);
+  }
+  .dl-menu-back{
+    color:var(--ink-soft); font-size:12px; padding:6px 9px; gap:7px; align-items:center;
+    border-bottom:1px solid var(--border-soft); border-radius:0; margin-bottom:3px;
+  }
+  .dl-menu-back svg{ width:13px; height:13px; margin-top:0; }
 
   main{ flex:1; display:flex; min-height:0; }
 
@@ -512,13 +524,11 @@
     /* Ordem dos botões dentro da faixa, da esquerda para a direita: Novo projeto, Abrir
        projeto, Baixar projeto, Modo claro/escuro, Tela cheia, Barra esquerda (ferramentas) e
        Barra direita (propriedades). */
-    #btnNew{ order:1; }
-    #btnOpen{ order:2; }
-    .dl-menu-wrap{ order:3; }
-    #btnTheme{ order:4; }
-    #btnFullscreen{ order:5; }
-    #btnOpenToolbar{ order:6; }
-    #btnOpenPanel{ order:7; }
+    .dl-menu-wrap{ order:1; }
+    #btnTheme{ order:2; }
+    #btnFullscreen{ order:3; }
+    #btnOpenToolbar{ order:4; }
+    #btnOpenPanel{ order:5; }
 
     aside.toolbar, aside.panel-wrap{
       position:fixed; top:0; bottom:0; z-index:400;
@@ -542,7 +552,13 @@
     .hbtn{ padding:9px 13px; min-height:40px; }
     .tbtn{ padding:10px 8px; min-height:44px; }
     .dl-menu-item{ padding:11px 9px; }
-    .dl-menu{ width:min(85vw, 260px); }
+    /* No celular a faixa de botões (.header-actions) rola horizontalmente (overflow-x:auto),
+       o que corta qualquer conteúdo "position:absolute" dentro dela -- o navegador força
+       overflow-y para "auto" também nesse caso, escondendo o menu abaixo da faixa de 42px de
+       altura. Por isso aqui o menu usa "position:fixed" (com as coordenadas calculadas via JS
+       toda vez que ele abre, ver positionProjMenuMobile()), o que o tira de dentro dessa faixa
+       e evita o corte -- ver openProjMenu(). */
+    .dl-menu{ width:min(85vw, 260px); position:fixed; right:auto; }
     .zoom-ctl button{ width:42px; height:42px; font-size:18px; }
     .fmt-btn{ width:36px; height:36px; }
     .grid-size-row button{ width:30px; height:30px; }
@@ -608,26 +624,45 @@
       <svg viewBox="0 0 20 20" id="fullscreenIcon"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4"/></svg>
       <span id="fullscreenLabel">Tela cheia</span>
     </button>
-    <button class="hbtn" id="btnNew">Novo projeto</button>
-    <button class="hbtn" id="btnOpen">Abrir projeto</button>
-    <div class="dl-menu-wrap" id="dlMenuWrap">
-      <button class="hbtn" id="btnSave" aria-haspopup="true" aria-expanded="false">
-        Baixar projeto
-        <svg viewBox="0 0 10 6" width="10" height="6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="dl-menu-wrap" id="projMenuWrap">
+      <button class="hbtn" id="btnProjMenu" aria-haspopup="true" aria-expanded="false">
+        Projeto
+        <svg class="dl-menu-caret" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <div class="dl-menu" id="dlMenu" hidden>
-        <button class="dl-menu-item" data-fmt="json">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/></svg>
-          <span><strong>JSON</strong><small>Arquivo do projeto, para reabrir e continuar editando depois</small></span>
-        </button>
-        <button class="dl-menu-item" data-fmt="jpg">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="16" height="14" rx="1.6"/><circle cx="6.6" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M2 14l4.5-4.5L10 13l3-3 5 4.5"/></svg>
-          <span><strong>JPG</strong><small>Imagem do diagrama atual</small></span>
-        </button>
-        <button class="dl-menu-item" data-fmt="pdf">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/><text x="10" y="15" text-anchor="middle" font-size="6.5" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">PDF</text></svg>
-          <span><strong>PDF</strong><small>Diagrama atual em um documento PDF</small></span>
-        </button>
+      <div class="dl-menu" id="projMenu" hidden>
+        <div class="dl-menu-panel" id="projMenuMain">
+          <button class="dl-menu-item" id="projMenuNew">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M10 7v6M7 10h6" stroke-linecap="round"/></svg>
+            <span><strong>Novo</strong><small>Começa um projeto em branco</small></span>
+          </button>
+          <button class="dl-menu-item" id="projMenuOpen">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 5.5a1 1 0 0 1 1-1h4.5l1.5 2H17a1 1 0 0 1 1 1v8.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5.5Z" stroke-linejoin="round"/></svg>
+            <span><strong>Abrir</strong><small>Carrega um projeto salvo (.json)</small></span>
+          </button>
+          <button class="dl-menu-item" id="projMenuSaveOpen" aria-haspopup="true">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 3v9M6.5 9L10 12.5 13.5 9" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 13.5V16a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><strong>Salvar</strong><small>Exporta como JSON, JPG ou PDF</small></span>
+            <svg class="dl-menu-caret-right" viewBox="0 0 6 10"><path d="M1 1l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="dl-menu-panel" id="projMenuSave" hidden>
+          <button class="dl-menu-item dl-menu-back" id="projMenuBack">
+            <svg viewBox="0 0 6 10"><path d="M5 1L1 5l4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Voltar
+          </button>
+          <button class="dl-menu-item" data-fmt="json">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/></svg>
+            <span><strong>JSON</strong><small>Arquivo do projeto, para reabrir e continuar editando depois</small></span>
+          </button>
+          <button class="dl-menu-item" data-fmt="jpg">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="16" height="14" rx="1.6"/><circle cx="6.6" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M2 14l4.5-4.5L10 13l3-3 5 4.5"/></svg>
+            <span><strong>JPG</strong><small>Imagem do diagrama atual</small></span>
+          </button>
+          <button class="dl-menu-item" data-fmt="pdf">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2h7l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M12 2v4h4"/><text x="10" y="15" text-anchor="middle" font-size="6.5" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">PDF</text></svg>
+            <span><strong>PDF</strong><small>Diagrama atual em um documento PDF</small></span>
+          </button>
+        </div>
       </div>
     </div>
     <button class="hbtn" id="btnOpenToolbar" title="Abrir ferramentas">
@@ -4316,7 +4351,7 @@ function convertLogicalToConceptual(logical){
 }
 
 /* ---------- projeto: novo / abrir / baixar ---------- */
-document.getElementById("btnNew").addEventListener("click", async function(){
+async function doNewProject(){
   var ok = await askConfirm("Novo projeto", "Isso substitui o diagrama atual nesta janela — incluindo o modelo lógico já convertido, se houver (ele continua salvo neste navegador até ser sobrescrito). Deseja continuar?", "Criar novo", false);
   if (!ok) return;
   mode = "conceptual";
@@ -4330,12 +4365,60 @@ document.getElementById("btnNew").addEventListener("click", async function(){
   render();
   fitToContent();
   showToast("Novo projeto criado.");
+}
+document.getElementById("projMenuNew").addEventListener("click", function(){
+  closeProjMenu();
+  doNewProject();
 });
 
-document.getElementById("btnOpen").addEventListener("click", function(){
+// Ao abrir a caixa de diálogo nativa de "Escolher arquivo" (uma janela do sistema
+// operacional, fora do controle da página), a maioria dos navegadores sai da tela cheia
+// automaticamente -- e, diferente do que se poderia imaginar, eles NÃO permitem reentrar
+// programaticamente nem de dentro do "change"/"cancel" do próprio seletor (por segurança,
+// exigem um gesto novo e direto do usuário, não uma reação a um evento assíncrono). Por isso,
+// em vez de tentar readquirir a tela cheia ali, guardamos que ficou pendente e a restauramos
+// no PRÓXIMO clique/tecla/toque do usuário -- geralmente o clique dele no próprio diálogo de
+// confirmação que aparece a seguir ("Abrir projeto") -- o mesmo truque já usado abaixo para
+// tentar a tela cheia inicial no primeiro gesto após a página carregar.
+function isDocFullscreen(){
+  return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+}
+function requestDocFullscreen(){
+  var el = document.documentElement;
+  var req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+  if (!req) return;
+  try {
+    var result = req.call(el);
+    if (result && typeof result.catch === "function") result.catch(function(){});
+  } catch (err){}
+}
+var wasFullscreenBeforeFilePicker = false;
+var fullscreenRestorePending = false;
+var FULLSCREEN_RESTORE_GESTURE_EVENTS = ["click", "keydown", "touchstart"];
+function onFullscreenRestoreGesture(){
+  fullscreenRestorePending = false;
+  FULLSCREEN_RESTORE_GESTURE_EVENTS.forEach(function(e){
+    document.removeEventListener(e, onFullscreenRestoreGesture, true);
+  });
+  if (!isDocFullscreen()) requestDocFullscreen();
+}
+function restoreFullscreenAfterFilePicker(){
+  if (!wasFullscreenBeforeFilePicker) return;
+  wasFullscreenBeforeFilePicker = false;
+  if (isDocFullscreen() || fullscreenRestorePending) return;
+  fullscreenRestorePending = true;
+  FULLSCREEN_RESTORE_GESTURE_EVENTS.forEach(function(evt){
+    document.addEventListener(evt, onFullscreenRestoreGesture, true);
+  });
+}
+document.getElementById("projMenuOpen").addEventListener("click", function(){
+  closeProjMenu();
+  wasFullscreenBeforeFilePicker = isDocFullscreen();
   document.getElementById("fileInput").click();
 });
+document.getElementById("fileInput").addEventListener("cancel", restoreFullscreenAfterFilePicker);
 document.getElementById("fileInput").addEventListener("change", function(e){
+  restoreFullscreenAfterFilePicker();
   var file = e.target.files && e.target.files[0];
   e.target.value = "";
   if (!file) return;
@@ -4583,35 +4666,74 @@ async function exportProjectImage(fmt){
   }
 }
 
-// ---------- menu do botão "Baixar projeto" (JSON / JPG / PDF) ----------
-var dlMenuWrap = document.getElementById("dlMenuWrap");
-var dlMenu = document.getElementById("dlMenu");
-var btnSaveEl = document.getElementById("btnSave");
-function closeDlMenu(){
-  dlMenu.hidden = true;
-  btnSaveEl.setAttribute("aria-expanded", "false");
+// ---------- menu do botão "Projeto" (Novo / Abrir / Salvar) ----------
+// "Salvar" abre um segundo painel dentro do mesmo menu (JSON / JPG / PDF) -- ver
+// #projMenuSaveOpen e #projMenuBack. As funções abaixo são "function" (não "var =") de
+// propósito, para ficarem disponíveis (hoisted) já no início do script, onde os itens
+// "Novo" e "Abrir" do menu (mais acima) precisam chamar closeProjMenu().
+var projMenuWrap = document.getElementById("projMenuWrap");
+var projMenu = document.getElementById("projMenu");
+var btnProjMenuEl = document.getElementById("btnProjMenu");
+var projMenuMain = document.getElementById("projMenuMain");
+var projMenuSave = document.getElementById("projMenuSave");
+function closeProjMenu(){
+  projMenu.hidden = true;
+  btnProjMenuEl.setAttribute("aria-expanded", "false");
+  // sempre volta pro painel principal, para a próxima vez que o menu for aberto
+  projMenuMain.hidden = false;
+  projMenuSave.hidden = true;
 }
-function openDlMenu(){
-  dlMenu.hidden = false;
-  btnSaveEl.setAttribute("aria-expanded", "true");
+function openProjMenu(){
+  projMenu.hidden = false;
+  btnProjMenuEl.setAttribute("aria-expanded", "true");
+  positionProjMenuMobile();
 }
-btnSaveEl.addEventListener("click", function(e){
+// No celular o menu vira "position:fixed" (ver a regra ".dl-menu" dentro do @media
+// max-width:880px), então suas coordenadas precisam ser calculadas na mão a cada abertura,
+// a partir da posição atual do botão "Projeto" na tela -- garante que o menu fique colado
+// nele e sempre visível, mesmo com a faixa de botões rolada para o lado. No desktop o menu
+// continua com o posicionamento normal do CSS (position:absolute; right:0), então aqui só
+// limpamos qualquer estilo inline deixado de uma visita anterior ao modo celular.
+function positionProjMenuMobile(){
+  if (mobileLayoutMQ.matches){
+    var r = projMenuWrap.getBoundingClientRect();
+    var menuWidth = projMenu.offsetWidth || 260;
+    var left = Math.min(r.left, window.innerWidth - menuWidth - 8);
+    left = Math.max(8, left);
+    projMenu.style.top = (r.bottom + 6) + "px";
+    projMenu.style.left = left + "px";
+  } else {
+    projMenu.style.top = "";
+    projMenu.style.left = "";
+  }
+}
+btnProjMenuEl.addEventListener("click", function(e){
   e.stopPropagation();
-  if (dlMenu.hidden) openDlMenu(); else closeDlMenu();
+  if (projMenu.hidden) openProjMenu(); else closeProjMenu();
 });
-dlMenu.querySelectorAll(".dl-menu-item").forEach(function(item){
+document.getElementById("projMenuSaveOpen").addEventListener("click", function(e){
+  e.stopPropagation();
+  projMenuMain.hidden = true;
+  projMenuSave.hidden = false;
+});
+document.getElementById("projMenuBack").addEventListener("click", function(e){
+  e.stopPropagation();
+  projMenuSave.hidden = true;
+  projMenuMain.hidden = false;
+});
+projMenuSave.querySelectorAll(".dl-menu-item[data-fmt]").forEach(function(item){
   item.addEventListener("click", function(){
     var fmt = item.getAttribute("data-fmt");
-    closeDlMenu();
+    closeProjMenu();
     if (fmt === "json") exportProjectJson();
     else exportProjectImage(fmt);
   });
 });
 document.addEventListener("click", function(e){
-  if (!dlMenu.hidden && !dlMenuWrap.contains(e.target)) closeDlMenu();
+  if (!projMenu.hidden && !projMenuWrap.contains(e.target)) closeProjMenu();
 });
 document.addEventListener("keydown", function(e){
-  if (e.key === "Escape" && !dlMenu.hidden) closeDlMenu();
+  if (e.key === "Escape" && !projMenu.hidden) closeProjMenu();
 });
 
 projectNameInput.addEventListener("input", function(e){
