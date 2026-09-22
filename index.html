@@ -482,8 +482,8 @@
   }
   .splash-overlay.splash-hide{ opacity:0; pointer-events:none; }
   .splash-cube-video{
-    width:min(90vw, 660px); height:auto; display:block;
-    background:#000;
+    width:100vw; height:100vh; display:block;
+    background:#000; object-fit:cover;
   }
 
   /* ---------- botões de abrir as gavetas (só existem/aparecem no layout de celular) ---------- */
@@ -609,6 +609,13 @@
     </select>
   </div>
   <input id="projectName" type="text" value="" spellcheck="false">
+  <!-- Duas faixas elásticas iguais (flex:1) em volta da mensagem de autosave dividem igualmente
+       o espaço livre entre o campo de nome do projeto e os botões à direita, centralizando a
+       mensagem nesse espaço -- em vez de position:absolute, que ficaria sobreposta ao campo de
+       nome ou aos botões em janelas mais estreitas (a mensagem some de qualquer forma abaixo de
+       880px, ver media query). Continua no fluxo normal do flex, então quando não há espaço
+       sobrando as duas faixas simplesmente encolhem a zero, sem sobrepor nada. -->
+  <div class="spacer"></div>
   <span class="autosave-note" id="autosaveNote"></span>
   <div class="spacer"></div>
   <!-- No desktop este agrupamento é invisível (display:contents -- ver regra ".header-actions"
