@@ -2299,6 +2299,25 @@ function attachNodeHandlers(g, node){
     document.addEventListener("pointerup", finish);
     document.addEventListener("pointercancel", finish);
   });
+
+  // Botão direito sobre uma entidade: seleciona ela e, se já tiver atributos ligados, abre o menu
+  // para reorganizá-los (ver showAttributeAlignMenu) em vez do menu de contexto padrão do navegador.
+  if (node.type === "entity"){
+    g.addEventListener("contextmenu", function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      if (pendingAdd || connectMode) return; // não faz sentido abrir o menu no meio de outra ação
+      selectedNodeIds = new Set([node.id]);
+      selectedEdgeIds = new Set();
+      render();
+      var attrs = connectedAttributesOf(node);
+      if (!attrs.length){
+        showToast('A entidade "' + (node.name || "") + '" não tem atributos para organizar.', "warn");
+        return;
+      }
+      showAttributeAlignMenu(node);
+    });
+  }
 }
 
 function handleNodeClick(node, additive){
@@ -2580,15 +2599,24 @@ async function placeGeneralizationOnEntity(superEntity){
 // já selecionado (ver o listener dos botões da barra logo abaixo), para permitir clicar várias
 // vezes seguidas no botão e ir adicionando vários atributos ao mesmo alvo sem precisar reselecioná-lo
 // a cada um, do mesmo jeito que "Chave primária"/"Chave estrangeira" já funcionam no modelo lógico.
-function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey){
-  var existing = state.edges.filter(function(e){
-    if (e.kind !== "plain") return false;
-    var otherId = e.from === target.id ? e.to : (e.to === target.id ? e.from : null);
-    if (!otherId) return false;
+// Todos os atributos ligados diretamente a um nó (entidade, relacionamento ou outro atributo, no
+// caso de composição) por uma aresta "plain" -- usada tanto para decidir o próximo lado ao
+// posicionar um atributo novo (abaixo) quanto para reorganizar os já existentes (ver
+// alignEntityAttributes, no menu de contexto do botão direito sobre uma entidade).
+function connectedAttributesOf(node){
+  var result = [];
+  state.edges.forEach(function(e){
+    if (e.kind !== "plain") return;
+    var otherId = e.from === node.id ? e.to : (e.to === node.id ? e.from : null);
+    if (!otherId) return;
     var other = getNode(otherId);
-    return !!(other && other.type === "attribute");
+    if (other && other.type === "attribute") result.push(other);
   });
-  var k = existing.length;
+  return result;
+}
+
+function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey){
+  var k = connectedAttributesOf(target).length;
   var side = k === 0 ? 0 : (k % 2 === 1 ? Math.ceil(k / 2) : -Math.ceil(k / 2));
   var spacing = 118;
   var targetDims = computeDims(target);
@@ -2604,6 +2632,118 @@ function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey
   if (stickyAdd) pendingAdd = stickyAdd;
   render();
   showToast('Atributo criado e conectado a "' + (target.name || "") + '".');
+}
+
+// ---------- organizar atributos de uma entidade (menu de contexto do botão direito) ----------
+// Reposiciona os atributos ligados diretamente a uma entidade em um dos quatro arranjos
+// escolhidos pelo usuário em showAttributeAlignMenu:
+//   "left"/"right"  -- empilhados verticalmente (um abaixo do outro), alinhados entre si pela
+//                      borda esquerda/direita, e ao LADO da entidade (esquerdo/direito) -- a
+//                      coluna fica centralizada na altura da entidade;
+//   "top"/"bottom"  -- lado a lado numa única linha, centralizados horizontalmente com a
+//                      entidade, ACIMA ou ABAIXO dela.
+// Só move os próprios atributos (não os nós ligados a eles, ex.: sub-atributos de uma
+// composição), do mesmo jeito que arrastar um nó no quadro nunca arrasta o que está ligado a ele.
+var ATTR_ALIGN_GAP = 70;      // distância da borda da entidade até o grupo de atributos
+var ATTR_ALIGN_ROW_STEP = 46; // espaçamento vertical entre atributos empilhados (alinhar à esquerda/direita)
+var ATTR_ALIGN_COL_GAP = 36;  // espaçamento horizontal entre atributos lado a lado (alinhar acima/abaixo)
+function alignEntityAttributes(entity, mode){
+  var attrs = connectedAttributesOf(entity);
+  if (!attrs.length) return false;
+  var entityDims = computeDims(entity);
+  var dimsList = attrs.map(computeDims);
+  // Encaixa na grade só a coordenada de referência COMPARTILHADA por todo o grupo (a borda comum
+  // da coluna, ou a linha comum da fileira) -- nunca a posição de cada atributo em separado, já
+  // que um atributo composto/multivalorado/derivado é ancorado pelo centro (não pela borda, como
+  // um atributo simples) e encaixar os dois na grade de forma independente bagunçaria a borda/
+  // linha comum que é justamente o objetivo do alinhamento (a diferença iria parar no
+  // arredondamento -- ver também o cálculo de "maxDim" abaixo, que evita qualquer atributo do
+  // grupo esbarrar na entidade mesmo quando os atributos têm tamanhos bem diferentes entre si).
+  if (mode === "top" || mode === "bottom"){
+    var rowMaxHalfH = dimsList.reduce(function(m, d){ return Math.max(m, d.h / 2); }, 0);
+    var centerY = mode === "top"
+      ? entity.y - entityDims.h / 2 - ATTR_ALIGN_GAP - rowMaxHalfH
+      : entity.y + entityDims.h / 2 + ATTR_ALIGN_GAP + rowMaxHalfH;
+    if (snapToGrid) centerY = snapValue(centerY);
+    var totalW = dimsList.reduce(function(sum, d){ return sum + d.w; }, 0) + ATTR_ALIGN_COL_GAP * (attrs.length - 1);
+    var x = entity.x - totalW / 2;
+    if (snapToGrid) x = snapValue(x);
+    attrs.forEach(function(a, i){
+      var d = dimsList[i];
+      a.x = isBareAttr(a) ? x : x + d.w / 2;
+      a.y = centerY;
+      x += d.w + ATTR_ALIGN_COL_GAP;
+    });
+  } else {
+    // "left" ou "right": empilhados verticalmente ao LADO da entidade, todos com a mesma borda
+    // (esquerda ou direita) entre si -- a borda comum usa a largura do atributo mais largo do
+    // grupo, para que nenhum atributo (nem o mais largo) fique perto demais da entidade; os mais
+    // estreitos, com a mesma borda alinhada, ficam com mais folga ainda (efeito "irregular" normal
+    // de uma lista alinhada de um só lado). A coluna toda fica centralizada verticalmente na
+    // altura da entidade.
+    var maxW = dimsList.reduce(function(m, d){ return Math.max(m, d.w); }, 0);
+    var refX = mode === "right"
+      ? entity.x + entityDims.w / 2 + ATTR_ALIGN_GAP + maxW
+      : entity.x - entityDims.w / 2 - ATTR_ALIGN_GAP - maxW;
+    if (snapToGrid) refX = snapValue(refX);
+    var startY = entity.y - ((attrs.length - 1) * ATTR_ALIGN_ROW_STEP) / 2;
+    attrs.forEach(function(a, i){
+      var d = dimsList[i];
+      var leftX = mode === "right" ? refX - d.w : refX;
+      a.x = isBareAttr(a) ? leftX : leftX + d.w / 2;
+      a.y = startY + i * ATTR_ALIGN_ROW_STEP;
+    });
+  }
+  return true;
+}
+// Menu de contexto (botão direito sobre uma entidade com atributos) para escolher um dos quatro
+// arranjos acima. Segue o mesmo padrão visual de askChoice3/askConfirm (modal-backdrop criado na
+// hora e removido ao final), mas com as opções em lista vertical (como o menu "Projeto") em vez de
+// botões lado a lado, já que os rótulos aqui são mais longos.
+function showAttributeAlignMenu(entity){
+  var backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  // Ícone "linha com itens de um lado dela" -- a linha representa a borda da entidade; os itens
+  // ficam acima (topIcon) ou abaixo dela (bottomIcon), mesma metáfora usada pelos ícones de
+  // alinhamento de texto (ALIGN_ICONS) para os outros dois, só que na horizontal.
+  var topIcon = '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' +
+    '<rect x="1" y="1" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
+    '<rect x="6.5" y="1" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
+    '<rect x="12" y="1" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
+    '<line x1="1" y1="10.5" x2="15" y2="10.5"/></svg>';
+  var bottomIcon = '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' +
+    '<line x1="1" y1="1.5" x2="15" y2="1.5"/>' +
+    '<rect x="1" y="5" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
+    '<rect x="6.5" y="5" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
+    '<rect x="12" y="5" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/></svg>';
+  function itemHtml(key, title, desc, iconSvg){
+    return '<button class="dl-menu-item" data-a="' + key + '">' + iconSvg +
+      '<span><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml(desc) + '</small></span></button>';
+  }
+  backdrop.innerHTML =
+    '<div class="modal-box">' +
+      '<h2>Organizar atributos</h2>' +
+      '<p>Escolha como os atributos de "' + escapeHtml(entity.name || "") + '" devem ficar dispostos no diagrama.</p>' +
+      '<div class="dl-menu-panel">' +
+        itemHtml("left", "Alinhar à esquerda", "Um abaixo do outro, alinhados à esquerda, do lado esquerdo da entidade.", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.left + '</svg>') +
+        itemHtml("right", "Alinhar à direita", "Um abaixo do outro, alinhados à direita, do lado direito da entidade.", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.right + '</svg>') +
+        itemHtml("top", "Alinhar na horizontal superior", "Lado a lado, centralizados, acima da entidade.", topIcon) +
+        itemHtml("bottom", "Alinhar na horizontal inferior", "Lado a lado, centralizados, abaixo da entidade.", bottomIcon) +
+      '</div>' +
+      '<div class="modal-actions"><button data-a="cancel">Cancelar</button></div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  function cleanup(){ backdrop.remove(); }
+  backdrop.addEventListener("click", function(e){ if (e.target === backdrop) cleanup(); });
+  backdrop.querySelector('[data-a="cancel"]').addEventListener("click", cleanup);
+  ["left", "right", "top", "bottom"].forEach(function(key){
+    backdrop.querySelector('[data-a="' + key + '"]').addEventListener("click", function(){
+      cleanup();
+      alignEntityAttributes(entity, key);
+      render();
+      showToast("Atributos organizados.");
+    });
+  });
 }
 
 // ---------- toque com dois dedos no quadro (pinça para dar zoom) ----------
