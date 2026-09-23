@@ -3506,12 +3506,6 @@ function updatePanel(){
     if (n.type === "entity"){
       html += '<label class="checkline"><input type="checkbox" id="pf-weak" ' + (n.weak ? "checked" : "") + '> Entidade fraca</label>';
     } else if (n.type === "attribute"){
-      html += '<div class="field"><label>Tipo</label><div class="radios">' +
-        radioRow("pf-kind", "simple", n.attrKind, "Simples") +
-        radioRow("pf-kind", "composite", n.attrKind, "Composto (conecte sub-atributos)") +
-        radioRow("pf-kind", "multivalued", n.attrKind, "Multivalorado") +
-        radioRow("pf-kind", "derived", n.attrKind, "Derivado") +
-        '</div></div>';
       html += '<label class="checkline"><input type="checkbox" id="pf-key" ' + (n.isKey ? "checked" : "") + '> É atributo-chave (sublinhado)</label>';
     } else if (n.type === "generalization"){
       html += '<div class="field"><label for="pf-coverage">Cobertura</label><select id="pf-coverage">' +
@@ -3530,7 +3524,6 @@ function updatePanel(){
     document.getElementById("pf-name").addEventListener("input", function(e){ n.name = e.target.value; render(); document.getElementById("pf-name").focus(); document.getElementById("pf-name").setSelectionRange(e.target.value.length, e.target.value.length); });
     if (n.type === "entity") document.getElementById("pf-weak").addEventListener("change", function(e){ n.weak = e.target.checked; render(); });
     if (n.type === "attribute"){
-      document.querySelectorAll('input[name="pf-kind"]').forEach(function(r){ r.addEventListener("change", function(e){ n.attrKind = e.target.value; render(); }); });
       document.getElementById("pf-key").addEventListener("change", function(e){ n.isKey = e.target.checked; render(); });
     }
     if (n.type === "generalization"){
@@ -3552,8 +3545,6 @@ function updatePanel(){
         '<option value="1"' + (ed.max==="1"?" selected":"") + '>1</option>' +
         '<option value="N"' + (ed.max==="N"?" selected":"") + '>N</option>' +
         '</select></div></div>';
-      html2 += '<div class="field"><label for="pf-role">Papel (opcional)</label><input type="text" id="pf-role" value="' + escapeHtml(ed.role || "") + '" placeholder="ex.: cursa, supervisiona"></div>';
-      html2 += '<p class="hint">Cardinalidade (mín,máx) exibida próxima à entidade, no padrão usado no BrModelo.</p>';
     } else if (ed.kind === "fk"){
       var fkChildTable = getNode(ed.from), fkParentTable = getNode(ed.to);
       var cChild = ed.cardChild || { min:"0", max:"N" };
@@ -3584,7 +3575,6 @@ function updatePanel(){
     if (ed.kind === "participation"){
       document.getElementById("pf-min").addEventListener("change", function(e){ ed.min = e.target.value; render(); });
       document.getElementById("pf-max").addEventListener("change", function(e){ ed.max = e.target.value; render(); });
-      document.getElementById("pf-role").addEventListener("input", function(e){ ed.role = e.target.value; render(); document.getElementById("pf-role").focus(); document.getElementById("pf-role").setSelectionRange(e.target.value.length, e.target.value.length); });
     } else if (ed.kind === "fk"){
       document.getElementById("pf-fk-cchild-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "min", e.target.value); render(); });
       document.getElementById("pf-fk-cchild-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "max", e.target.value); render(); });
