@@ -446,6 +446,18 @@
     background:var(--surface); color:var(--danger); font-size:14px; line-height:1;
   }
   .col-del:hover{ background:var(--danger-fill); }
+  /* Alça de arraste para reordenar as colunas -- mesmo padrão de pointer events (não o Drag and
+     Drop nativo do HTML5) usado no resto do app para arrastar nós/alças no quadro, o que já
+     funciona igual em mouse e toque. touch-action:none evita que o navegador tente rolar a
+     página ao começar a arrastar pelo celular, antes do JS receber o gesto. */
+  .col-drag-handle{
+    flex:0 0 14px; display:flex; align-items:center; justify-content:center;
+    cursor:grab; touch-action:none; color:var(--ink-soft); -webkit-user-select:none; user-select:none;
+  }
+  .col-drag-handle:active{ cursor:grabbing; }
+  .col-drag-handle svg{ width:9px; height:16px; pointer-events:none; display:block; }
+  .col-drag-handle svg circle{ fill:currentColor; }
+  .col-row.col-row-dragging{ opacity:.5; }
   .col-fk-refs{ display:flex; gap:5px; margin:-2px 0 4px; padding-left:2px; }
   .col-fk-refs select{
     flex:1; min-width:0; padding:4px 5px; border-radius:5px; border:1px solid var(--border);
@@ -711,10 +723,6 @@
       <button class="tbtn" data-add="attribute" data-kind="simple">
         <svg viewBox="0 0 24 16"><ellipse class="ic-stroke" cx="12" cy="8" rx="11" ry="7"/></svg>
         Simples
-      </button>
-      <button class="tbtn" data-add="attribute" data-kind="composite">
-        <svg viewBox="0 0 24 20"><ellipse class="ic-stroke" cx="12" cy="6" rx="9" ry="5"/><line class="ic-stroke" x1="7" y1="10" x2="3" y2="17"/><line class="ic-stroke" x1="17" y1="10" x2="21" y2="17"/><ellipse class="ic-stroke" cx="3" cy="18" rx="2.4" ry="1.6"/><ellipse class="ic-stroke" cx="21" cy="18" rx="2.4" ry="1.6"/></svg>
-        Composto
       </button>
       <button class="tbtn" data-add="attribute" data-kind="simple" data-key="1" title="Atributo simples que identifica a entidade de forma única (chave) — aparece sublinhado, como na notação de Chen">
         <svg viewBox="0 0 24 16"><ellipse class="ic-stroke" cx="12" cy="7" rx="11" ry="6"/><line class="ic-stroke" x1="4" y1="14.5" x2="20" y2="14.5"/></svg>
@@ -3206,8 +3214,11 @@ function renderTablePanel(n){
     // Pedido do usuario: cada parametro da coluna numa linha propria -- Nome; Tipo; Tamanho e
     // Decimal juntos numa mesma linha; PK e FK juntos numa mesma linha (o botao de remover a
     // coluna fica junto do nome, no topo, por ser a acao mais rapida de achar).
-    html += '<div class="col-row">';
+    html += '<div class="col-row" data-row-i="' + i + '">';
     html += '<div class="col-row-line col-row-name-line">';
+    html += '<span class="col-drag-handle" data-i="' + i + '" draggable="false" title="Arraste para reordenar a coluna" aria-label="Arraste para reordenar a coluna">' +
+      '<svg viewBox="0 0 10 16"><circle cx="3" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="7" cy="3" r="1.4"/><circle cx="7" cy="8" r="1.4"/><circle cx="7" cy="13" r="1.4"/></svg>' +
+      '</span>';
     html += '<span class="col-row-label">Nome</span>';
     html += '<input type="text" class="col-name" data-i="' + i + '" value="' + escapeHtml(c.name) + '" placeholder="nome">';
     html += '<button type="button" class="col-del" data-i="' + i + '" title="Remover coluna">×</button>';
@@ -3394,6 +3405,80 @@ function renderTablePanel(n){
     btn.addEventListener("click", function(){
       var i = Number(btn.getAttribute("data-i"));
       n.columns.splice(i, 1); render();
+    });
+  });
+  // Arrastar e soltar para reordenar as colunas pela alça (⠿) de cada linha. Evita re-renderizar
+  // o painel inteiro a cada pointermove (o que destruiria o elemento com o pointer capture no meio
+  // do arraste) -- em vez disso, move as próprias linhas .col-row no DOM conforme o ponteiro passa
+  // por cima da linha vizinha, e só aplica a nova ordem em n.columns (e faz um único render()) ao
+  // soltar. Cada linha guarda seu índice ORIGINAL em data-row-i, usado no final para remontar
+  // n.columns na ordem final mostrada na tela.
+  var colListEl = panelEl.querySelector(".col-list");
+  panelEl.querySelectorAll(".col-drag-handle").forEach(function(handle){
+    handle.addEventListener("pointerdown", function(e){
+      if (e.button !== 0 && e.pointerType === "mouse") return;
+      e.preventDefault();
+      e.stopPropagation();
+      var row = handle.closest(".col-row");
+      if (!row || !colListEl) return;
+      var pointerId = e.pointerId;
+      row.classList.add("col-row-dragging");
+      // De propósito SEM setPointerCapture: a própria linha arrastada (que contém a alça) é
+      // reordenada no DOM a cada movimento (ver onMove), e mover o elemento capturado no meio do
+      // gesto faz alguns navegadores soltarem a captura sozinhos, interrompendo o arraste depois
+      // da primeira troca de posição. Ouvir no document, como o resto do app já faz para arrastar
+      // nós/alças no quadro (ver comentário mais acima sobre pointercancel), evita esse problema.
+
+      // Uma coluna com FK marcado tem um bloco extra ".col-fk-refs" (tabela/coluna referenciada)
+      // logo depois da sua ".col-row" no DOM, como irmão -- não dentro dela. Para não separar esse
+      // bloco da linha à qual pertence ao reordenar (nem embaralhar o bloco de OUTRA coluna que por
+      // acaso esteja entre duas linhas), tratamos cada linha + seu ".col-fk-refs" (se houver) como
+      // uma unidade só, tanto ao decidir o ponto de inserção quanto ao mover a própria linha
+      // arrastada.
+      var rowFkRefs = row.nextElementSibling && row.nextElementSibling.classList.contains("col-fk-refs") ? row.nextElementSibling : null;
+      function unitAfter(rowEl){
+        var next = rowEl.nextElementSibling;
+        if (next && next.classList.contains("col-fk-refs")) next = next.nextElementSibling;
+        return next;
+      }
+
+      function rowsNow(){ return Array.from(colListEl.querySelectorAll(".col-row")); }
+
+      function onMove(ev){
+        if (ev.pointerId !== pointerId) return;
+        var y = ev.clientY;
+        var rows = rowsNow();
+        var rowIdx = rows.indexOf(row);
+        for (var k = 0; k < rows.length; k++){
+          var sib = rows[k];
+          if (sib === row) continue;
+          var rect = sib.getBoundingClientRect();
+          var mid = rect.top + rect.height / 2;
+          if (k < rowIdx && y < mid){
+            colListEl.insertBefore(row, sib);
+            if (rowFkRefs) colListEl.insertBefore(rowFkRefs, row.nextSibling);
+            break;
+          }
+          if (k > rowIdx && y > mid){
+            colListEl.insertBefore(row, unitAfter(sib));
+            if (rowFkRefs) colListEl.insertBefore(rowFkRefs, row.nextSibling);
+            break;
+          }
+        }
+      }
+      function finish(ev){
+        if (ev && ev.pointerId !== pointerId) return;
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", finish);
+        document.removeEventListener("pointercancel", finish);
+        row.classList.remove("col-row-dragging");
+        var newOrder = rowsNow().map(function(r){ return Number(r.getAttribute("data-row-i")); });
+        n.columns = newOrder.map(function(origIdx){ return n.columns[origIdx]; });
+        render();
+      }
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", finish);
+      document.addEventListener("pointercancel", finish);
     });
   });
   document.getElementById("pf-col-add").addEventListener("click", function(){
@@ -4099,6 +4184,19 @@ function convertConceptualToLogical(conceptual){
         usedRelFkColumns[manySide.id + "|" + colName] = true;
       });
     }
+  });
+
+  // Passo 6: nas tabelas que vieram de uma entidade (tableByEntityId), garante que as colunas de
+  // chave primária fiquem sempre na frente das demais -- mesmo quando a PK só foi descoberta ou
+  // acrescentada depois da coluna original (FK-que-também-é-PK da entidade fraca no Passo 2, ou
+  // herdada da superclasse na generalização no Passo 3, ambas concatenadas ao final das colunas
+  // já existentes). A ordem relativa dentro de cada grupo (as PKs entre si, e as demais colunas
+  // entre si) é preservada.
+  Object.keys(tableByEntityId).forEach(function(eid){
+    var t = tableByEntityId[eid];
+    var pkCols = t.columns.filter(function(c){ return c.pk; });
+    var otherCols = t.columns.filter(function(c){ return !c.pk; });
+    t.columns = pkCols.concat(otherCols);
   });
 
   autoLayoutTables(logical.nodes);
