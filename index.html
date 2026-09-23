@@ -4572,11 +4572,71 @@ function projectFileBase(){
     .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "modelo-conceitual";
 }
 
-// Rotina de download compartilhada pelos três formatos (JSON, JPG, PDF): usa a capacidade
-// "downloads" da plataforma quando disponível (ver initCapabilities acima) e cai para um link
-// de download comum (Blob + <a download>) quando não -- exatamente como o botão "Baixar
-// projeto (.json)" já fazia antes de virar um menu com várias opções.
-async function downloadFile(filename, data, msgs){
+// Extensão -> tipo MIME, usada só para sugerir o tipo certo na janela nativa "Salvar como"
+// (showSaveFilePicker, abaixo) -- não afeta os outros dois caminhos de download.
+var SAVE_PICKER_MIME_BY_EXT = { json:"application/json", jpg:"image/jpeg", jpeg:"image/jpeg", pdf:"application/pdf", html:"text/html" };
+
+// Abre a janela nativa "Salvar como" (showSaveFilePicker) o quanto antes -- ANTES de qualquer
+// trabalho assíncrono mais lento, como o fetch() que "Baixar DER Fácil" faz pra buscar uma cópia
+// limpa da página (ver downloadAppHtml) ou o carregamento da biblioteca de PDF. A permissão do
+// navegador pra mostrar essa janela exige um gesto do usuário "fresco"; esperar por outra coisa
+// assíncrona antes de chamá-la arrisca essa janela de oportunidade se fechar sozinha -- chamando
+// a API logo no clique, esse risco fica no mínimo possível. Retorna um "writable" pronto
+// (write/close) quando o usuário escolhe onde salvar, ou `null` para qualquer outro desfecho: API
+// inexistente neste navegador, indisponível dentro do iframe do claude.ai, sem permissão de gesto
+// do usuário, OU o próprio usuário fechando a janela sem escolher nada -- de propósito não
+// distinguimos esse último caso dos demais aqui (o navegador não garante uma forma confiável de
+// diferenciá-los -- ver o comentário em downloadFile), então `null` sempre cai discretamente para
+// os caminhos de reserva de downloadFile, exatamente como se a janela nativa nunca tivesse existido.
+async function tryNativeSavePicker(filename){
+  if (typeof window.showSaveFilePicker !== "function") return null;
+  try {
+    var ext = (filename.match(/\.([a-z0-9]+)$/i) || [null, ""])[1].toLowerCase();
+    var mime = SAVE_PICKER_MIME_BY_EXT[ext] || "application/octet-stream";
+    var acceptMap = {};
+    acceptMap[mime] = ext ? ["." + ext] : [];
+    var handle = await window.showSaveFilePicker({
+      suggestedName: filename,
+      types: [{ description: ext ? ext.toUpperCase() : "Arquivo", accept: acceptMap }]
+    });
+    return await handle.createWritable();
+  } catch (err){
+    return null;
+  }
+}
+
+// Rotina de download compartilhada por todos os formatos que o app salva (JSON do projeto, JPG,
+// PDF e a cópia autônoma "der-facil.html"). Pedido do usuário: ao salvar, abrir uma janela para
+// escolher o local e o nome do arquivo -- por isso o primeiro caminho tentado é a janela nativa
+// "Salvar como" (ver tryNativeSavePicker acima). Ela só existe em navegadores baseados em
+// Chromium (Chrome, Edge) e, por restrição do próprio navegador, não funciona dentro do iframe
+// que exibe este artefato em claude.ai (APIs de arquivo local são bloqueadas em iframes de
+// origem cruzada) -- mas funciona normalmente quando a página roda "por conta própria", como a
+// cópia baixada pelo botão "Baixar DER Fácil". Quando ela não está disponível ou não pôde ser
+// usada por qualquer motivo (inclusive o usuário fechando a janela sem escolher nada -- o
+// navegador não distingue isso de forma confiável de "a janela nem pôde ser mostrada"), os dois
+// caminhos de antes continuam como reserva: a capacidade "downloads" da plataforma (que já pede
+// confirmação do nome do arquivo, com sua própria opção de cancelar) e, por último, um link de
+// download comum -- ou seja, o pior caso possível continua sendo exatamente o comportamento de
+// antes desta janela nativa existir, nunca pior.
+// nativeWriter (opcional): um "writable" já obtido de antemão via tryNativeSavePicker, para quem
+// chama downloadFile precisar gerar os dados (data) de forma assíncrona antes de ter tudo pronto
+// -- ver downloadAppHtml/exportProjectImage. Quando omitido, downloadFile tenta abrir a janela na
+// hora (usado por exportProjectJson, cujos dados já estão prontos de forma síncrona).
+async function downloadFile(filename, data, msgs, nativeWriter){
+  if (nativeWriter === undefined) nativeWriter = await tryNativeSavePicker(filename);
+  if (nativeWriter){
+    try {
+      var blobToWrite = (data instanceof Blob) ? data : new Blob([data]);
+      await nativeWriter.write(blobToWrite);
+      await nativeWriter.close();
+      showToast(msgs.saved);
+      return;
+    } catch (err){
+      // Escrever no arquivo falhou depois que a janela já tinha sido aceita (raro, ex.: disco
+      // cheio, permissão negada pelo SO) -- cai pros caminhos de reserva abaixo, iguais a antes.
+    }
+  }
   if (!(window.claude && typeof window.claude.use === "function")){
     try {
       var blob = (data instanceof Blob) ? data : new Blob([data]);
@@ -4748,19 +4808,23 @@ async function exportProjectImage(fmt){
     delivered: isPdf ? "PDF enviado." : "Imagem enviada.",
     failed: "Não foi possível gerar o " + (isPdf ? "PDF" : "JPG") + " agora."
   };
+  // Abre a janela nativa "Salvar como" já no clique, antes de gerar a imagem/PDF (o PDF em
+  // especial pode demorar, pois carrega uma biblioteca externa) -- ver o comentário de
+  // tryNativeSavePicker sobre por que isso importa.
+  var nativeWriter = await tryNativeSavePicker(filename);
   try {
     var canvas = await renderDiagramToCanvas(2);
     if (!isPdf){
       var blob = await new Promise(function(resolve){ canvas.toBlob(resolve, "image/jpeg", 0.92); });
       if (!blob) throw new Error("toBlob falhou");
-      await downloadFile(filename, blob, msgs);
+      await downloadFile(filename, blob, msgs, nativeWriter);
     } else {
       var JsPDFCtor = await ensureJsPDF();
       var imgData = canvas.toDataURL("image/jpeg", 0.92);
       var orientation = canvas.width >= canvas.height ? "l" : "p";
       var doc = new JsPDFCtor({ orientation: orientation, unit: "px", format: [canvas.width, canvas.height] });
       doc.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
-      await downloadFile(filename, doc.output("blob"), msgs);
+      await downloadFile(filename, doc.output("blob"), msgs, nativeWriter);
     }
   } catch (err){
     showToast(msgs.failed, "warn");
@@ -4979,6 +5043,10 @@ document.getElementById("btnTheme").addEventListener("click", function(){
 // exemplo, alguma restrição do ambiente em que a página está hospedada), cai para o outerHTML
 // mesmo assim, para o botão continuar funcionando.
 async function downloadAppHtml(){
+  var filename = "der-facil.html";
+  // Abre a janela nativa "Salvar como" já no clique, ANTES do fetch abaixo (que pode demorar um
+  // pouco) -- ver o comentário de tryNativeSavePicker sobre por que isso importa.
+  var nativeWriter = await tryNativeSavePicker(filename);
   var html;
   try {
     var res = await fetch(location.href, { cache: "no-store" });
@@ -4987,11 +5055,11 @@ async function downloadAppHtml(){
   } catch (err){
     html = "<!doctype html>\n" + document.documentElement.outerHTML;
   }
-  await downloadFile("der-facil.html", html, {
+  await downloadFile(filename, html, {
     saved: "DER Fácil baixado como der-facil.html.",
     delivered: "DER Fácil enviado.",
     failed: "Não foi possível baixar a ferramenta agora."
-  });
+  }, nativeWriter);
 }
 document.getElementById("btnDownloadApp").addEventListener("click", downloadAppHtml);
 
