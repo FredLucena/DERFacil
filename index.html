@@ -3575,6 +3575,7 @@ function updatePanel(){
         '<p>Selecione uma tabela no quadro para editar seu nome e suas colunas aqui.</p>' +
         '<p>Use "Tabela" na barra à esquerda para criar uma tabela nova, e "Conectar" para ligar duas tabelas — isso já cria automaticamente uma coluna de chave estrangeira (FK) na primeira tabela clicada.</p>' +
         '<p>Dica: marque uma coluna como "PK" para torná-la chave primária — só assim outra tabela pode referenciá-la.</p>' +
+        '<p>Dica: segure Ctrl (ou Cmd no Mac) ao clicar num botão da barra à esquerda, como "Tabela" ou "Conectar", para "fixar" a ferramenta e incluir vários elementos seguidos, sem precisar clicar no botão de novo a cada um.</p>' +
         '</div>';
       return;
     }
@@ -3585,6 +3586,7 @@ function updatePanel(){
       '<p>Use os botões à esquerda para adicionar elementos e "Conectar" para ligá-los.</p>' +
       '<p>Dica: arraste um laço ao redor de vários elementos (ou Shift+clique) para selecioná-los — depois é só arrastar um deles para mover todos juntos, ou excluir todos de uma vez.</p>' +
       '<p>Dica: com "Alinhar à grade" ativado (botão na barra à esquerda), os elementos encaixam nos pontos da grade ao arrastar. Segure Alt para mover livremente sem encaixar.</p>' +
+      '<p>Dica: segure Ctrl (ou Cmd no Mac) ao clicar num botão da barra à esquerda, como "Entidade", "Atributo" ou "Conectar", para "fixar" a ferramenta e incluir vários elementos seguidos, sem precisar clicar no botão de novo a cada um.</p>' +
       '</div>';
     return;
   }
@@ -3659,6 +3661,7 @@ function updatePanel(){
 
     if (n.type === "entity"){
       html += '<label class="checkline"><input type="checkbox" id="pf-weak" ' + (n.weak ? "checked" : "") + '> Entidade fraca</label>';
+      html += '<p class="hint">Dica: clique com o botão direito sobre a entidade para alinhar automaticamente os atributos ligados a ela (à esquerda, à direita, acima ou abaixo dela).</p>';
     } else if (n.type === "attribute"){
       html += '<label class="checkline"><input type="checkbox" id="pf-key" ' + (n.isKey ? "checked" : "") + '> É atributo-chave (sublinhado)</label>';
     } else if (n.type === "generalization"){
