@@ -453,11 +453,24 @@
 
   .type-mgmt-list{ display:flex; flex-direction:column; gap:6px; margin:14px 0; max-height:280px; overflow-y:auto; }
   .type-mgmt-row{
-    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    display:flex; flex-direction:column; gap:6px;
     background:var(--surface-2); border:1px solid var(--border); border-radius:6px;
     padding:6px 6px 6px 10px; font-family:var(--font-mono); font-size:12.5px;
   }
-  .type-mgmt-row span{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .type-mgmt-row-main{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .type-mgmt-row-main span{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Linha de "Tam. padrão"/"Dec. padrão", só aparece para tipos com 1 ou 2 parâmetros (ver
+     openTypeManagementModal) -- os valores aqui pré-preenchem "Tam."/"Dec." de uma coluna assim
+     que esse tipo é escolhido para ela. */
+  .type-mgmt-row-defaults{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding-left:2px; }
+  .type-mgmt-row-defaults label{
+    font-family:var(--font-body); font-size:11px; color:var(--ink-soft); white-space:nowrap;
+  }
+  .type-mgmt-default-size, .type-mgmt-default-decimals{
+    width:58px; min-width:0; padding:4px 6px; border-radius:5px; border:1px solid var(--border);
+    background:var(--surface); color:var(--ink); font-family:var(--font-mono); font-size:12px;
+  }
+  .type-mgmt-default-size:focus, .type-mgmt-default-decimals:focus{ outline:none; border-color:var(--select); }
   .type-mgmt-empty{ color:var(--ink-soft); font-size:13px; padding:6px 2px; }
   .type-mgmt-add{ display:flex; gap:8px; margin-top:4px; flex-wrap:wrap; }
   .type-mgmt-add input{
@@ -785,7 +798,6 @@
         Anotação
       </button>
     </div>
-    <hr class="tdiv">
     <div class="tgroup">
       <div class="tgroup-label">Tipos de dados</div>
       <button class="tbtn" id="btnManageTypes" title="Cadastrar ou excluir os tipos de dados disponíveis para as colunas">
@@ -795,7 +807,7 @@
     </div>
     <hr class="tdiv">
     <div class="tgroup">
-      <div class="tgroup-label">Alinhamento</div>
+      <div class="tgroup-label">Alinhar</div>
       <button class="tbtn" id="btnSnap" title="Ao arrastar, encaixa os elementos nos pontos da grade">
         <svg viewBox="0 0 20 20"><circle class="ic-stroke" cx="3" cy="3" r="1"/><circle class="ic-stroke" cx="10" cy="3" r="1"/><circle class="ic-stroke" cx="17" cy="3" r="1"/><circle class="ic-stroke" cx="3" cy="10" r="1"/><circle class="ic-stroke" cx="17" cy="10" r="1"/><circle class="ic-stroke" cx="3" cy="17" r="1"/><circle class="ic-stroke" cx="17" cy="17" r="1"/><rect class="ic-stroke" x="6.5" y="6.5" width="7" height="7" rx="1.4"/></svg>
         Alinhar à grade
@@ -810,7 +822,6 @@
       </div>
     </div>
     <div id="toolbarLogical" hidden>
-      <hr class="tdiv">
       <div class="tgroup">
         <div class="tgroup-label">Tabelas</div>
         <button class="tbtn" data-add="table" title="Adicionar uma nova tabela em branco">
@@ -887,12 +898,19 @@ var SVG_NS = "http://www.w3.org/2000/svg";
 
 // Tipos de dados que já vêm cadastrados por padrão — o usuário pode adicionar outros, excluir
 // estes, ou mudar quantos parâmetros cada um tem, pelo painel "Gerenciar tipos" (no modo lógico).
-// Cada tipo agora é um objeto { name, params }, onde "params" é 0, 1 ou 2:
-//   0 -- o tipo não tem parâmetro nenhum (nem "Tam.", nem "Dec."), ex.: DATE;
-//   1 -- o tipo só tem "Tam." (ex.: o "50" de VARCHAR(50));
-//   2 -- o tipo tem "Tam." e "Dec." (ex.: o "10,2" de DECIMAL(10,2)).
-// O valor de "Tam."/"Dec." é digitado à parte, em campos próprios ao lado do tipo, e concatenado
-// entre parênteses só na hora de exibir/gerar o tipo completo da coluna (ver fullDataType).
+// Cada tipo agora é um objeto { name, params, defaultSize, defaultDecimals }, onde:
+//   params -- 0, 1 ou 2:
+//     0 -- o tipo não tem parâmetro nenhum (nem "Tam.", nem "Dec."), ex.: DATE;
+//     1 -- o tipo só tem "Tam." (ex.: o "50" de VARCHAR(50));
+//     2 -- o tipo tem "Tam." e "Dec." (ex.: o "10,2" de DECIMAL(10,2)).
+//   defaultSize/defaultDecimals -- valores (texto livre, ex.: "8" ou "5") usados para preencher
+//     automaticamente "Tam."/"Dec." de uma coluna assim que esse tipo é escolhido para ela (ver
+//     getTypeDefaultParams); vazios ("") quando o tipo não tem um padrão definido, e nesse caso
+//     os campos da coluna começam em branco, como sempre foi.
+// O valor de "Tam."/"Dec." de cada coluna é digitado à parte, em campos próprios ao lado do tipo,
+// e concatenado entre parênteses só na hora de exibir/gerar o tipo completo da coluna (ver
+// fullDataType) -- os valores padrão aqui só preenchem esses campos de largada, sem travar o que
+// a pessoa digita numa coluna específica depois.
 var DEFAULT_DATA_TYPE_NAMES = ["INT", "BIGINT", "SMALLINT", "TINYINT", "BIT", "DECIMAL", "FLOAT", "REAL", "CHAR", "VARCHAR", "NCHAR", "NVARCHAR", "DATE", "TIME"];
 // Estimativa de quantos parâmetros um tipo tem quando isso ainda não foi cadastrado explicitamente
 // -- usada para montar os padrões de fábrica, para migrar uma lista salva no formato antigo (só
@@ -920,9 +938,11 @@ function paramCountSelectHtml(current){
   }).join("");
 }
 var DEFAULT_DATA_TYPES = DEFAULT_DATA_TYPE_NAMES.map(function(n){
-  return { name: n, params: defaultParamCountForName(n) };
+  return { name: n, params: defaultParamCountForName(n), defaultSize: "", defaultDecimals: "" };
 });
-var customDataTypes = DEFAULT_DATA_TYPES.map(function(t){ return { name: t.name, params: t.params }; });
+var customDataTypes = DEFAULT_DATA_TYPES.map(function(t){
+  return { name: t.name, params: t.params, defaultSize: t.defaultSize, defaultDecimals: t.defaultDecimals };
+});
 // Quantos parâmetros (0/1/2) o tipo de nome "name" tem -- procura na lista cadastrada; se a
 // coluna usa um tipo que não está (mais) cadastrado, cai na estimativa de defaultParamCountForName.
 function getTypeParamCount(name){
@@ -931,6 +951,23 @@ function getTypeParamCount(name){
     if (customDataTypes[i].name.toUpperCase() === upper) return customDataTypes[i].params;
   }
   return defaultParamCountForName(name);
+}
+// Valores padrão de "Tam."/"Dec." cadastrados para o tipo "name" (ver comentário acima de
+// DEFAULT_DATA_TYPE_NAMES) -- usados para pré-preencher os campos de uma coluna assim que esse
+// tipo é escolhido para ela (troca de tipo numa coluna existente, ou criação de uma coluna nova).
+// Retorna sempre { dataSize, dataDecimals } com strings (vazias quando não há padrão cadastrado
+// ou o tipo não existe na lista).
+function getTypeDefaultParams(name){
+  var upper = String(name || "").toUpperCase();
+  for (var i = 0; i < customDataTypes.length; i++){
+    if (customDataTypes[i].name.toUpperCase() === upper){
+      return {
+        dataSize: String(customDataTypes[i].defaultSize || ""),
+        dataDecimals: String(customDataTypes[i].defaultDecimals || "")
+      };
+    }
+  }
+  return { dataSize: "", dataDecimals: "" };
 }
 // Os tipos cadastrados são sempre mostrados em ordem alfabética pelo nome (sem diferenciar
 // maiúsc./minúsc.), tanto no painel "Gerenciar tipos" quanto nos combos de tipo das colunas —
@@ -1120,17 +1157,23 @@ function loadDataTypePrefs(){
     if (!raw) return;
     var arr = JSON.parse(raw);
     if (!Array.isArray(arr) || !arr.length) return;
-    // Compatível com o formato antigo (lista salva antes deste navegador ter cadastrado uma
-    // lista apenas com nomes, sem "params") -- um item que é uma string vira { name, params }
-    // usando a estimativa de defaultParamCountForName; um item já no formato novo é validado.
+    // Compatível com formatos salvos antes deste navegador ter os campos atuais: um item que é
+    // uma string vira { name, params } usando a estimativa de defaultParamCountForName; um item
+    // que já tem "name"/"params" mas ainda não tem "defaultSize"/"defaultDecimals" (salvo antes
+    // dessa dupla existir) ganha esses dois campos vazios; um item já completo é só validado.
     var out = [];
     arr.forEach(function(item){
       if (typeof item === "string"){
         var name = item.trim();
-        if (name) out.push({ name: name, params: defaultParamCountForName(name) });
+        if (name) out.push({ name: name, params: defaultParamCountForName(name), defaultSize: "", defaultDecimals: "" });
       } else if (item && typeof item === "object" && item.name != null){
         var name2 = String(item.name).trim();
-        if (name2) out.push({ name: name2, params: clampParamCount(item.params) });
+        if (name2) out.push({
+          name: name2,
+          params: clampParamCount(item.params),
+          defaultSize: item.defaultSize != null ? String(item.defaultSize).trim() : "",
+          defaultDecimals: item.defaultDecimals != null ? String(item.defaultDecimals).trim() : ""
+        });
       }
     });
     if (out.length){
@@ -1179,7 +1222,7 @@ function addDataType(name, params){
   var exists = customDataTypes.some(function(t){ return t.name.toLowerCase() === trimmed.toLowerCase(); });
   if (exists) return false;
   var p = (params === undefined || params === null || params === "") ? defaultParamCountForName(trimmed) : clampParamCount(params);
-  customDataTypes.push({ name: trimmed, params: p });
+  customDataTypes.push({ name: trimmed, params: p, defaultSize: "", defaultDecimals: "" });
   sortDataTypes(customDataTypes);
   saveDataTypePrefs();
   return true;
@@ -1190,6 +1233,18 @@ function setDataTypeParams(name, params){
   var entry = customDataTypes.filter(function(t){ return t.name === name; })[0];
   if (!entry) return false;
   entry.params = clampParamCount(params);
+  saveDataTypePrefs();
+  return true;
+}
+// Muda o(s) valor(es) padrão de "Tam."/"Dec." de um tipo já cadastrado -- usados para pré-
+// preencher os campos de uma coluna assim que esse tipo é escolhido para ela (ver
+// getTypeDefaultParams). Passar "" limpa o padrão daquele campo. Retorna false se o tipo não
+// existir na lista.
+function setDataTypeDefaults(name, defaultSize, defaultDecimals){
+  var entry = customDataTypes.filter(function(t){ return t.name === name; })[0];
+  if (!entry) return false;
+  if (defaultSize !== undefined) entry.defaultSize = String(defaultSize || "").trim();
+  if (defaultDecimals !== undefined) entry.defaultDecimals = String(defaultDecimals || "").trim();
   saveDataTypePrefs();
   return true;
 }
@@ -3042,7 +3097,10 @@ document.getElementById("btnAddColumn").addEventListener("click", function(){
   var t = getSingleSelectedTable();
   if (!t){ showToast("Selecione uma tabela para adicionar um campo.", "warn"); return; }
   t.columns = t.columns || [];
-  t.columns.push({ name: uniqueColumnName(t, "campo"), dataType:"VARCHAR", dataSize:"50", pk:false, fk:false, fkTable:null, fkColumn:null });
+  // "50" é o valor de fallback de sempre, usado só quando VARCHAR não tem um "Tam. padrão"
+  // cadastrado em "Gerenciar tipos" (ver getTypeDefaultParams) -- com um cadastrado, ele vence.
+  var varcharDefaults = getTypeDefaultParams("VARCHAR");
+  t.columns.push({ name: uniqueColumnName(t, "campo"), dataType:"VARCHAR", dataSize: varcharDefaults.dataSize || "50", dataDecimals: varcharDefaults.dataDecimals || "", pk:false, fk:false, fkTable:null, fkColumn:null });
   render();
 });
 
@@ -3050,7 +3108,8 @@ document.getElementById("btnAddPkColumn").addEventListener("click", function(){
   var t = getSingleSelectedTable();
   if (!t){ showToast("Selecione uma tabela para adicionar uma coluna de chave primária.", "warn"); return; }
   t.columns = t.columns || [];
-  t.columns.push({ name: uniqueColumnName(t, "chave_primaria"), dataType:"INT", dataSize:"", pk:true, fk:false, fkTable:null, fkColumn:null });
+  var intDefaults = getTypeDefaultParams("INT");
+  t.columns.push({ name: uniqueColumnName(t, "chave_primaria"), dataType:"INT", dataSize: intDefaults.dataSize || "", dataDecimals: intDefaults.dataDecimals || "", pk:true, fk:false, fkTable:null, fkColumn:null });
   render();
 });
 
@@ -3431,6 +3490,13 @@ function renderTablePanel(n){
       // só uma segunda trava de segurança.
       if (col.fk) return;
       col.dataType = e.target.value;
+      // Ao trocar o tipo, "Tam."/"Dec." são repreenchidos com o padrão cadastrado para o novo
+      // tipo em "Gerenciar tipos" (ver getTypeDefaultParams) -- em branco quando esse tipo não
+      // tem um padrão definido, em vez de manter um valor do tipo anterior que não faz mais
+      // sentido (ex.: o "50" de um VARCHAR ao trocar para DATE).
+      var typeDefaults = getTypeDefaultParams(col.dataType);
+      col.dataSize = typeDefaults.dataSize;
+      col.dataDecimals = typeDefaults.dataDecimals;
       // O tipo (e o tamanho/casas decimais atuais) de uma coluna FK deve sempre espelhar os da
       // coluna que ela referencia — repassa o conjunto completo, não só o campo que mudou.
       syncForeignKeysForColumnChange(n, col.name, col.name, col.dataType, col.dataSize || "", col.dataDecimals || "");
@@ -3593,7 +3659,8 @@ function renderTablePanel(n){
     });
   });
   document.getElementById("pf-col-add").addEventListener("click", function(){
-    n.columns.push({ name:"coluna", dataType:"VARCHAR", dataSize:"50", pk:false, fk:false, fkTable:null, fkColumn:null });
+    var varcharDefaults = getTypeDefaultParams("VARCHAR");
+    n.columns.push({ name:"coluna", dataType:"VARCHAR", dataSize: varcharDefaults.dataSize || "50", dataDecimals: varcharDefaults.dataDecimals || "", pk:false, fk:false, fkTable:null, fkColumn:null });
     render();
   });
   document.getElementById("pf-delete").addEventListener("click", function(){ deleteNode(n.id); render(); });
@@ -5209,7 +5276,7 @@ function openTypeManagementModal(){
   backdrop.innerHTML =
     '<div class="modal-box">' +
     '<h2>Tipos de dados</h2>' +
-    '<p>Cadastre ou exclua os tipos disponíveis nos combos de tipo das colunas do modelo lógico, e escolha quantos parâmetros cada um tem: 0 (sem "Tam." nem "Dec.", ex.: DATE), 1 (só "Tam.", ex.: VARCHAR) ou 2 ("Tam." e "Dec.", ex.: DECIMAL). No modelo lógico, o campo de configuração da coluna mostra só os parâmetros que o tipo escolhido tiver.</p>' +
+    '<p>Cadastre ou exclua os tipos disponíveis nos combos de tipo das colunas do modelo lógico, e escolha quantos parâmetros cada um tem: 0 (sem "Tam." nem "Dec.", ex.: DATE), 1 (só "Tam.", ex.: VARCHAR) ou 2 ("Tam." e "Dec.", ex.: DECIMAL). No modelo lógico, o campo de configuração da coluna mostra só os parâmetros que o tipo escolhido tiver. Dá pra definir também um "Tam."/"Dec." padrão para cada tipo — ex.: DATE com Tam. padrão 8, ou DECIMAL com Tam. padrão 5 e Dec. padrão 2 — que pré-preenche esses campos assim que o tipo é escolhido numa coluna.</p>' +
     '<div class="type-mgmt-list" id="typeMgmtList"></div>' +
     '<div class="type-mgmt-add">' +
       '<input type="text" id="typeMgmtInput" placeholder="Novo tipo (ex.: TEXT)" maxlength="30">' +
@@ -5228,9 +5295,24 @@ function openTypeManagementModal(){
       return;
     }
     listEl.innerHTML = customDataTypes.map(function(t){
-      return '<div class="type-mgmt-row"><span>' + escapeHtml(t.name) + '</span>' +
+      var row = '<div class="type-mgmt-row">' +
+        '<div class="type-mgmt-row-main"><span>' + escapeHtml(t.name) + '</span>' +
         '<select class="type-mgmt-params-select" data-type="' + escapeHtml(t.name) + '" title="Quantidade de parâmetros deste tipo">' + paramCountSelectHtml(t.params) + '</select>' +
         '<button type="button" class="col-del" data-type="' + escapeHtml(t.name) + '" title="Excluir tipo">×</button></div>';
+      // Campos de "Tam. padrão"/"Dec. padrão" -- só aparecem quando o tipo tem esse parâmetro
+      // (mesma lógica de renderTablePanel: 1 parâmetro mostra só Tam., 2 mostram Tam. e Dec.).
+      if (t.params >= 1){
+        row += '<div class="type-mgmt-row-defaults">' +
+          '<label>Tam. padrão</label>' +
+          '<input type="text" class="type-mgmt-default-size" data-type="' + escapeHtml(t.name) + '" value="' + escapeHtml(t.defaultSize || "") + '" placeholder="ex.: 50" title="Preenche \'Tam.\' automaticamente ao escolher este tipo numa coluna">';
+        if (t.params >= 2){
+          row += '<label>Dec. padrão</label>' +
+            '<input type="text" class="type-mgmt-default-decimals" data-type="' + escapeHtml(t.name) + '" value="' + escapeHtml(t.defaultDecimals || "") + '" placeholder="ex.: 2" title="Preenche \'Dec.\' automaticamente ao escolher este tipo numa coluna">';
+        }
+        row += '</div>';
+      }
+      row += '</div>';
+      return row;
     }).join("");
     listEl.querySelectorAll(".col-del").forEach(function(btn){
       btn.addEventListener("click", function(){
@@ -5242,7 +5324,21 @@ function openTypeManagementModal(){
     listEl.querySelectorAll(".type-mgmt-params-select[data-type]").forEach(function(sel){
       sel.addEventListener("change", function(){
         setDataTypeParams(sel.getAttribute("data-type"), sel.value);
+        // A quantidade de parâmetros decide se os campos de Tam./Dec. padrão aparecem, então a
+        // linha inteira precisa ser refeita (diferente dos campos de valor padrão abaixo, que só
+        // gravam o valor, sem mudar o que está visível em nenhuma linha).
+        renderList();
         render();
+      });
+    });
+    listEl.querySelectorAll(".type-mgmt-default-size[data-type]").forEach(function(inp){
+      inp.addEventListener("input", function(){
+        setDataTypeDefaults(inp.getAttribute("data-type"), inp.value, undefined);
+      });
+    });
+    listEl.querySelectorAll(".type-mgmt-default-decimals[data-type]").forEach(function(inp){
+      inp.addEventListener("input", function(){
+        setDataTypeDefaults(inp.getAttribute("data-type"), undefined, inp.value);
       });
     });
   }
