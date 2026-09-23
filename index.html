@@ -1602,65 +1602,6 @@ function pasteClipboard(){
   showToast(newNodes.length === 1 ? "1 elemento colado." : newNodes.length + " elementos colados.");
 }
 
-/* ---------- diagrama de exemplo ---------- */
-function buildExampleState(){
-  var s = freshState("Exemplo: Sistema Acadêmico");
-  function N(type, name, x, y, extra){
-    var labels = { entity:"Entidade", relationship:"Relacionamento", attribute:"Atributo", generalization:"Generalização" };
-    var n = Object.assign({ id: uid("nd"), type:type, name:name, x:x, y:y,
-      weak:false, identifying:false, attrKind:"simple", isKey:false, coverage:"partial", overlap:"disjoint" }, extra || {});
-    s.nodes.push(n); s.nextIds[type]++;
-    return n;
-  }
-  function E(a, b, extra){
-    var e = Object.assign({ id: uid("ed"), from:a.id, to:b.id, kind:"plain", min:"1", max:"N", role:"" }, extra || {});
-    s.edges.push(e);
-    return e;
-  }
-
-  var pessoa = N("entity", "Pessoa", 640, 40);
-  var gen = N("generalization", "Generalização", 640, 140, { coverage:"partial", overlap:"disjoint" });
-  var aluno = N("entity", "Aluno", 400, 250);
-  var professor = N("entity", "Professor", 860, 250);
-  var profNome = N("attribute", "nome", 1040, 250, { attrKind:"simple" });
-
-  var alunoMatricula = N("attribute", "matrícula", 170, 150, { attrKind:"simple", isKey:true });
-  var alunoNomeCompleto = N("attribute", "nome completo", 170, 300, { attrKind:"composite" });
-  var alunoPrimeiro = N("attribute", "primeiro nome", 40, 380, { attrKind:"simple" });
-  var alunoSobrenome = N("attribute", "sobrenome", 200, 400, { attrKind:"simple" });
-  var alunoTelefone = N("attribute", "telefone", 400, 400, { attrKind:"multivalued" });
-  var alunoIdade = N("attribute", "idade", 560, 350, { attrKind:"derived" });
-
-  var reside = N("relationship", "Reside", 400, 480, { identifying:true });
-  var endereco = N("entity", "Endereço", 400, 610, { weak:true });
-  var enderecoCep = N("attribute", "CEP", 570, 610, { attrKind:"simple", isKey:true });
-
-  var matricula = N("relationship", "Matrícula", 640, 480);
-  var disciplina = N("entity", "Disciplina", 640, 640);
-  var discCodigo = N("attribute", "código", 800, 640, { attrKind:"simple", isKey:true });
-  var discNome = N("attribute", "nome", 640, 760, { attrKind:"simple" });
-
-  E(pessoa, gen);
-  E(gen, aluno);
-  E(gen, professor);
-  E(professor, profNome, { kind:"plain" });
-  E(aluno, alunoMatricula, { kind:"plain" });
-  E(aluno, alunoNomeCompleto, { kind:"plain" });
-  E(alunoNomeCompleto, alunoPrimeiro, { kind:"plain" });
-  E(alunoNomeCompleto, alunoSobrenome, { kind:"plain" });
-  E(aluno, alunoTelefone, { kind:"plain" });
-  E(aluno, alunoIdade, { kind:"plain" });
-  E(aluno, reside, { kind:"participation", min:"1", max:"1", role:"" });
-  E(reside, endereco, { kind:"participation", min:"1", max:"1", role:"" });
-  E(endereco, enderecoCep, { kind:"plain" });
-  E(aluno, matricula, { kind:"participation", min:"1", max:"N", role:"cursa" });
-  E(matricula, disciplina, { kind:"participation", min:"0", max:"N", role:"" });
-  E(disciplina, discCodigo, { kind:"plain" });
-  E(disciplina, discNome, { kind:"plain" });
-
-  return s;
-}
-
 /* ---------- geometria ---------- */
 // Atributos simples (sem elipse) são posicionados pela BORDA ESQUERDA do texto — node.x é onde
 // o texto começa — em vez do centro, para que vários atributos alinhados na mesma coordenada x
@@ -3745,9 +3686,10 @@ function loadInitialState(){
       }
     }
   } catch (err){ /* ignora e usa exemplo */ }
-  showToast('Exibindo um diagrama de exemplo — clique em "Novo projeto" para começar do zero.');
+  // Nada salvo ainda neste navegador (primeira vez, aba anônima, ou dados do site limpos) --
+  // começa com um projeto em branco, igual ao que "Novo projeto" cria.
   mode = "conceptual";
-  conceptualModel = buildExampleState();
+  conceptualModel = freshState();
   logicalModel = null;
   state = conceptualModel;
   resetUndoHistory();
