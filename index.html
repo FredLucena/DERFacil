@@ -371,6 +371,22 @@
   }
   .zoom-ctl button:last-child{ border-bottom:none; }
   .zoom-ctl button:hover{ background:var(--surface-2); }
+  #stage[hidden], .zoom-ctl[hidden]{ display:none; }
+
+  /* Pedido do usuário: painel do Modelo Físico, com o SQL gerado a partir do Modelo Lógico --
+     ocupa o lugar do quadro (svg#stage) enquanto está ativo (ver applyModeUI/renderPhysicalSql). */
+  .sql-view{ position:absolute; inset:0; display:flex; flex-direction:column; background:var(--bg); }
+  .sql-view-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 14px; border-bottom:1px solid var(--border); background:var(--surface);
+  }
+  .sql-view-title{ font-size:12.5px; color:var(--ink-soft); }
+  .sql-output{
+    flex:1; margin:0; padding:16px 20px; overflow:auto; width:100%; box-sizing:border-box;
+    border:none; resize:none; background:var(--bg);
+    font-family:var(--font-mono); font-size:12.5px; line-height:1.6; color:var(--ink); white-space:pre;
+  }
+  .sql-output:focus{ outline:none; background:var(--surface); }
 
   .legend-btn-wrap{ position:absolute; left:16px; bottom:16px; }
 
@@ -414,6 +430,9 @@
   .col-row-label{
     flex:0 0 28px; font-size:10px; color:var(--ink-soft); text-align:left; white-space:nowrap;
   }
+  /* Pedido do usuário: a alça de arraste e o botão de remover ficam sozinhos na linha do topo
+     da coluna, um em cada ponta (o nome desce para a linha seguinte -- ver col-row-name-line). */
+  .col-row-handle-line{ justify-content:space-between; }
   .col-row-name-line .col-name{ flex:1; min-width:0; }
   .col-row-type-line .col-type-base{ flex:1; min-width:0; }
   .col-row-size-line{ gap:8px; }
@@ -445,11 +464,38 @@
   .col-drag-handle svg{ width:9px; height:16px; pointer-events:none; display:block; }
   .col-drag-handle svg circle{ fill:currentColor; }
   .col-row.col-row-dragging{ opacity:.5; }
-  .col-fk-refs{ display:flex; gap:5px; margin:-2px 0 4px; padding-left:2px; }
+  /* Pedido do usuário: o bloco de tabela/coluna referenciada da FK fica DENTRO da janela da
+     própria coluna (não mais como um bloco solto logo depois dela) -- por isso agora é só mais
+     uma ".col-row-line" dentro do ".col-row" (flex-column com gap:5px), sem margem própria. */
+  .col-fk-refs{ display:flex; gap:5px; padding-left:2px; }
   .col-fk-refs select{
     flex:1; min-width:0; padding:4px 5px; border-radius:5px; border:1px solid var(--border);
     background:var(--surface); color:var(--ink); font-size:11.5px;
   }
+  /* Pedido do usuário: no final da configuração de cada coluna, um objeto de restrição (escolhida
+     da lista cadastrada em "Gerenciar restrições") com os campos de parâmetro necessários (0, 1 ou
+     2, conforme a restrição escolhida), e um botão para adicionar mais de uma por coluna. */
+  .col-constraints{ display:flex; flex-direction:column; gap:5px; }
+  .col-constraint-row{ display:flex; align-items:center; gap:5px; }
+  .col-constraint-name{
+    flex:1; min-width:0; padding:4px 5px; border-radius:5px; border:1px solid var(--border);
+    background:var(--surface); color:var(--ink); font-size:11.5px;
+  }
+  .col-constraint-p1, .col-constraint-p2{
+    flex:0 0 58px; min-width:0; padding:4px 5px; border-radius:5px; border:1px solid var(--border);
+    background:var(--surface); color:var(--ink); font-family:var(--font-mono); font-size:11.5px;
+  }
+  .col-constraint-del{
+    flex-shrink:0; width:22px; height:22px; border-radius:5px; border:1px solid var(--border);
+    background:var(--surface); color:var(--danger); font-size:14px; line-height:1;
+  }
+  .col-constraint-del:hover{ background:var(--danger-fill); }
+  .col-constraint-add{
+    display:flex; align-items:center; justify-content:center; gap:5px; width:100%;
+    background:transparent; border:1px dashed var(--border); border-radius:6px;
+    padding:5px; font-size:11.5px; color:var(--ink-soft);
+  }
+  .col-constraint-add:hover{ background:var(--surface-2); color:var(--ink); }
 
   .type-mgmt-list{ display:flex; flex-direction:column; gap:6px; margin:14px 0; max-height:280px; overflow-y:auto; }
   .type-mgmt-row{
@@ -485,6 +531,14 @@
     background:var(--surface); color:var(--ink); font-family:var(--font-body); font-size:12px;
   }
   .type-mgmt-params-select:focus{ outline:none; border-color:var(--select); }
+  /* Campo de descrição de cada restrição cadastrada (ver openConstraintManagementModal) -- mesma
+     linha ".type-mgmt-row-defaults" usada para "Tam. padrão"/"Dec. padrão" dos tipos, mas aqui com
+     um único campo de texto ocupando a largura toda. */
+  .type-mgmt-desc-input{
+    flex:1; min-width:0; padding:4px 6px; border-radius:5px; border:1px solid var(--border);
+    background:var(--surface); color:var(--ink); font-family:var(--font-body); font-size:12px;
+  }
+  .type-mgmt-desc-input:focus{ outline:none; border-color:var(--select); }
 
   /* ---------- tela de abertura (splash) ---------- */
   .splash-overlay{
@@ -662,9 +716,10 @@
 <header>
   <div class="brand">
     <span class="mark" id="brandMark" title="Sobre o DER Fácil">DER Fácil</span>
-    <select id="modeSelect" class="mode-select" title="Alternar entre modelagem conceitual e lógica">
+    <select id="modeSelect" class="mode-select" title="Alternar entre modelagem conceitual, lógica e o modelo físico (SQL)">
       <option value="conceptual">Modelagem Conceitual</option>
       <option value="logical">Modelagem Lógica</option>
+      <option value="physical">Modelo Físico</option>
     </select>
   </div>
   <input id="projectName" type="text" value="" spellcheck="false">
@@ -804,6 +859,10 @@
         <svg viewBox="0 0 20 20"><ellipse class="ic-stroke" cx="10" cy="4.5" rx="7" ry="2.5"/><path class="ic-stroke" d="M3 4.5v11c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-11"/><path class="ic-stroke" d="M3 10c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></svg>
         Gerenciar tipos
       </button>
+      <button class="tbtn" id="btnManageConstraints" title="Cadastrar ou excluir as restrições usadas para documentar tabelas e colunas (ex.: UNIQUE, CHECK, DEFAULT)">
+        <svg viewBox="0 0 20 20"><path class="ic-stroke" d="M10 1.5l7 2.5v5c0 5-3 8.5-7 9.5-4-1-7-4.5-7-9.5v-5z"/><polyline class="ic-stroke" points="7,10 9.3,12.3 13.5,7.5"/></svg>
+        Gerenciar restrições
+      </button>
     </div>
     <hr class="tdiv">
     <div class="tgroup">
@@ -868,10 +927,22 @@
       <g id="nodesGroup"></g>
       <rect id="marqueeRect" x="0" y="0" width="0" height="0" fill="rgba(43,108,176,0.12)" stroke="var(--select)" stroke-width="1.2" stroke-dasharray="4 3" pointer-events="none" visibility="hidden"></rect>
     </svg>
-    <div class="zoom-ctl">
+    <div class="zoom-ctl" id="zoomCtl">
       <button id="zoomIn" title="Aproximar">+</button>
       <button id="zoomOut" title="Afastar">−</button>
       <button id="zoomFit" title="Ajustar à tela">⤢</button>
+    </div>
+    <!-- Pedido do usuário: ao escolher "Modelo Físico" no seletor do topo, gera o código SQL a
+         partir das definições do Modelo Lógico (tabelas, colunas, tipos, PK/FK e restrições por
+         coluna) -- ver generateSqlFromLogicalModel/renderPhysicalSql. Fica no lugar do quadro
+         (svg#stage), que fica escondido enquanto esta visão está ativa (ver applyModeUI). A caixa
+         é editável -- o usuário pode alterar o SQL livremente, sem que isso afete o modelo lógico. -->
+    <div class="sql-view" id="sqlView" hidden>
+      <div class="sql-view-bar">
+        <span class="sql-view-title">Modelo Físico — SQL gerado a partir do Modelo Lógico</span>
+        <button type="button" class="hbtn" id="btnCopySql" title="Copiar o SQL gerado para a área de transferência">Copiar SQL</button>
+      </div>
+      <textarea class="sql-output" id="sqlOutput" spellcheck="false"></textarea>
     </div>
   </div>
 
@@ -893,6 +964,7 @@ var STORAGE_KEY = "estudioDER.autosave.v1";     // formato antigo: só o modelo 
 var STORAGE_KEY_V2 = "estudioDER.autosave.v2";  // formato novo: os dois modelos (conceitual + lógico) e o modo ativo
 var PREFS_KEY = "estudioDER.prefs.v1";  // preferências de edição (grade), independentes do projeto salvo
 var TYPES_KEY = "estudioDER.types.v1";  // lista de tipos de dados disponíveis nas colunas do modelo lógico — cadastrada pelo usuário, independente do projeto salvo (vale em qualquer diagrama aberto neste navegador)
+var CONSTRAINTS_KEY = "estudioDER.constraints.v1";  // lista de restrições cadastradas (ex.: UNIQUE, CHECK, DEFAULT), com descrição opcional — cadastrada pelo usuário, independente do projeto salvo (vale em qualquer diagrama aberto neste navegador)
 var THEME_KEY = "estudioDER.theme.v1";  // preferência de tema (claro/escuro) escolhida no botão, independente do projeto salvo
 var SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -978,6 +1050,43 @@ function sortDataTypes(list){
 }
 sortDataTypes(customDataTypes);
 
+// Restrições cadastradas (ex.: UNIQUE, CHECK, DEFAULT) pelo painel "Gerenciar restrições",
+// semelhante à lista de tipos de dados acima -- inclusive na quantidade de parâmetros (0, 1 ou 2,
+// ver paramCountSelectHtml perto de DEFAULT_DATA_TYPE_NAMES): 0 quando a restrição não precisa de
+// nenhum parâmetro (ex.: UNIQUE), 1 quando precisa de um (ex.: o valor de DEFAULT, ou a expressão
+// de CHECK) e 2 quando precisa de dois (ex.: uma FOREIGN KEY, que referencia tabela + coluna).
+// Cada restrição tem ainda uma descrição opcional (texto livre explicando a regra). Esta lista
+// alimenta o combo de restrições no final da configuração de cada coluna do modelo lógico (ver
+// renderTablePanel) -- lá, cada coluna guarda suas PRÓPRIAS instâncias em c.constraints (qual
+// restrição cadastrada foi escolhida + o(s) valor(es) de parâmetro digitados para ela).
+var DEFAULT_CONSTRAINTS = [
+  { name: "UNIQUE", description: "Garante que o valor da coluna não se repete entre as linhas da tabela.", params: 0 },
+  { name: "CHECK", description: "Restringe os valores aceitos pela coluna a uma condição (ex.: idade >= 0).", params: 1 },
+  { name: "DEFAULT", description: "Define um valor padrão usado quando nenhum é informado ao inserir a linha.", params: 1 }
+];
+var customConstraints = DEFAULT_CONSTRAINTS.map(function(c){
+  return { name: c.name, description: c.description, params: c.params };
+});
+// Restrições cadastradas são sempre mostradas em ordem alfabética pelo nome (sem diferenciar
+// maiúsc./minúsc.), tanto no painel "Gerenciar restrições" quanto ao carregar do localStorage.
+function sortConstraints(list){
+  list.sort(function(a, b){ return a.name.toLowerCase().localeCompare(b.name.toLowerCase()); });
+  return list;
+}
+sortConstraints(customConstraints);
+// Quantos parâmetros (0/1/2) a restrição cadastrada de nome "name" tem -- procura na lista
+// cadastrada (customConstraints); se a coluna usa uma restrição que não está (mais) cadastrada
+// (foi excluída da lista, ou veio de um projeto salvo em outro navegador), retorna 0 -- assim o
+// valor já digitado fica guardado na coluna (ver renderTablePanel), só sem campo de parâmetro
+// visível até a restrição voltar a ser cadastrada com a quantidade certa.
+function getConstraintParamCount(name){
+  var upper = String(name || "").toUpperCase();
+  for (var i = 0; i < customConstraints.length; i++){
+    if (customConstraints[i].name.toUpperCase() === upper) return customConstraints[i].params;
+  }
+  return 0;
+}
+
 // Um projeto agora guarda DOIS modelos independentes — "conceptual" (o DER em notação Chen) e
 // "logical" (tabelas do modelo relacional) — e `mode` diz qual deles está ativo. `state` sempre
 // aponta para o modelo ativo (o mesmo objeto guardado em conceptualModel/logicalModel), então
@@ -987,6 +1096,22 @@ var mode = "conceptual";        // "conceptual" | "logical"
 var conceptualModel = null;
 var logicalModel = null;        // null até a primeira vez que o usuário entra em "Modelagem Lógica"
 var state = null;
+// Pedido do usuário: uma terceira opção no seletor do topo, "Modelo Físico", que mostra o SQL
+// gerado a partir do Modelo Lógico. Em vez de um terceiro valor de `mode` (o que obrigaria a
+// revisar cada trecho do código que testa mode==="logical"/"conceptual" -- render, arraste,
+// copiar/colar, salvar/carregar...), o físico é só mais uma VISÃO por cima do modo atual: entrar
+// nele NÃO mexe em `mode`, `state`, no modelo conceitual nem no lógico -- só este booleano extra
+// marca que a visão ativa é o SQL, não o quadro (ver enterPhysicalView). Não é salvo entre
+// sessões -- reabrir o projeto sempre volta para conceitual/lógica (o modo realmente salvo),
+// nunca direto no físico.
+var physicalActive = false;
+// O texto do SQL exibido/editável no Modelo Físico. É independente do modelo lógico -- só é
+// (re)gerado a partir dele quando o usuário escolhe explicitamente "Sim" na janela "Gerar modelo
+// físico"; fora isso, o usuário pode editar livremente sem que isso afete o modelo lógico. Ao
+// contrário de `physicalActive` (a visão em si, que nunca é salva), o TEXTO do SQL é salvo junto
+// com o projeto (ver buildProjectSnapshot/applyLoadedProject) -- bug relatado pelo usuário: "o
+// SQL não está sendo salvo" -- senão o SQL gerado/editado se perdia a cada recarregamento.
+var physicalSql = "";
 var view = { x:0, y:0, w:1200, h:800 };
 var selectedNodeIds = new Set();
 var selectedEdgeIds = new Set();
@@ -1183,6 +1308,40 @@ function loadDataTypePrefs(){
   } catch (err){ /* ignora lista corrompida e usa os padrões */ }
 }
 
+// Lista de restrições cadastradas (ver comentário perto de DEFAULT_CONSTRAINTS) -- salva à parte
+// do projeto, igual à de tipos de dados. Sem nada salvo ainda (primeira vez), usa a lista padrão.
+function saveConstraintPrefs(){
+  try {
+    localStorage.setItem(CONSTRAINTS_KEY, JSON.stringify(customConstraints));
+  } catch (err){ /* localStorage indisponível: a lista não persiste, mas o app segue funcionando */ }
+}
+function loadConstraintPrefs(){
+  try {
+    var raw = localStorage.getItem(CONSTRAINTS_KEY);
+    if (!raw) return;
+    var arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || !arr.length) return;
+    var out = [];
+    arr.forEach(function(item){
+      if (typeof item === "string"){
+        var name = item.trim();
+        if (name) out.push({ name: name, description: "", params: 1 });
+      } else if (item && typeof item === "object" && item.name != null){
+        var name2 = String(item.name).trim();
+        if (name2) out.push({
+          name: name2,
+          description: item.description != null ? String(item.description).trim() : "",
+          params: clampParamCount(item.params)
+        });
+      }
+    });
+    if (out.length){
+      customConstraints = out;
+      sortConstraints(customConstraints);
+    }
+  } catch (err){ /* ignora lista corrompida e usa os padrões */ }
+}
+
 // Tema (claro/escuro): o CSS já segue sozinho a preferência do sistema operacional (media query
 // prefers-color-scheme). O atributo data-theme="light"/"dark" na raiz do documento tem prioridade
 // sobre essa media query (ver regras no bloco de estilos), então usá-lo é o suficiente para o botão fixar
@@ -1254,6 +1413,41 @@ function setDataTypeDefaults(name, defaultSize, defaultDecimals){
 function removeDataType(name){
   customDataTypes = customDataTypes.filter(function(t){ return t.name !== name; });
   saveDataTypePrefs();
+}
+
+// Adiciona uma restrição nova (aparada, sem duplicar ignorando maiúsc./minúsc.), com uma descrição
+// opcional. Retorna false sem alterar nada quando o nome é vazio ou já existe.
+function addConstraint(name, description, params){
+  var trimmed = String(name || "").trim();
+  if (!trimmed) return false;
+  var exists = customConstraints.some(function(c){ return c.name.toLowerCase() === trimmed.toLowerCase(); });
+  if (exists) return false;
+  customConstraints.push({ name: trimmed, description: String(description || "").trim(), params: clampParamCount(params) });
+  sortConstraints(customConstraints);
+  saveConstraintPrefs();
+  return true;
+}
+// Muda a descrição de uma restrição já cadastrada. Retorna false se a restrição não existir na lista.
+function setConstraintDescription(name, description){
+  var entry = customConstraints.filter(function(c){ return c.name === name; })[0];
+  if (!entry) return false;
+  entry.description = String(description || "").trim();
+  saveConstraintPrefs();
+  return true;
+}
+// Muda a quantidade de parâmetros (0/1/2) de uma restrição já cadastrada. Retorna false se a
+// restrição não existir na lista.
+function setConstraintParams(name, params){
+  var entry = customConstraints.filter(function(c){ return c.name === name; })[0];
+  if (!entry) return false;
+  entry.params = clampParamCount(params);
+  saveConstraintPrefs();
+  return true;
+}
+// Remove uma restrição da lista de cadastradas.
+function removeConstraint(name){
+  customConstraints = customConstraints.filter(function(c){ return c.name !== name; });
+  saveConstraintPrefs();
 }
 
 var DIMS = {
@@ -1780,6 +1974,100 @@ function tableColumnLine(c){
   if (c.fk) tags.push("FK");
   var suffix = tags.length ? "  [" + tags.join(", ") + "]" : "";
   return (c.name || "") + " : " + fullDataType(c) + suffix;
+}
+
+/* ---------- Modelo Físico: geração de SQL a partir do Modelo Lógico ---------- */
+// Identificador entre aspas duplas quando não é um identificador SQL "simples" (letras, dígitos
+// e "_", não começando por dígito) -- ex.: nomes com espaço, acento ou começando com número.
+function sqlIdent(name){
+  var s = String(name || "").trim();
+  if (!s) return '"_"';
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ? s : '"' + s.replace(/"/g, '""') + '"';
+}
+// Traduz UMA instância de restrição de coluna (ver c.constraints, painel do modelo lógico) para
+// SQL. As restrições que têm uma sintaxe SQL conhecida e segura de combinar na mesma coluna
+// (UNIQUE, NOT NULL, CHECK, DEFAULT, IDENTITY -- reconhecidas pelo nome, sem diferenciar
+// maiúsculas) viram uma cláusula inline, logo depois do tipo da coluna. Qualquer outra restrição
+// cadastrada pelo usuário (ex.: uma customizada qualquer) tem sintaxe SQL desconhecida, então em
+// vez de arriscar gerar um SQL inválido ela vira um comentário ao final da linha da coluna (ver
+// generateSqlFromLogicalModel) -- só para documentar que a restrição existe.
+function sqlConstraintClause(cst){
+  var name = String((cst && cst.name) || "").trim();
+  if (!name) return null;
+  var upper = name.toUpperCase();
+  var p1 = String((cst && cst.p1) || "").trim();
+  var p2 = String((cst && cst.p2) || "").trim();
+  if (upper === "UNIQUE") return { inline: "UNIQUE" };
+  if (upper === "NOT NULL" || upper === "NOTNULL") return { inline: "NOT NULL" };
+  if (upper === "CHECK") return { inline: p1 ? "CHECK (" + p1 + ")" : "CHECK" };
+  if (upper === "DEFAULT") return { inline: p1 ? "DEFAULT " + p1 : "DEFAULT" };
+  if (upper === "IDENTITY"){
+    var idParams = [p1, p2].filter(function(v){ return v; });
+    return { inline: idParams.length ? "IDENTITY (" + idParams.join(", ") + ")" : "IDENTITY" };
+  }
+  var params = [p1, p2].filter(function(v){ return v; });
+  return { comment: name + (params.length ? " (" + params.join(", ") + ")" : "") };
+}
+// Gera o código SQL (um CREATE TABLE por tabela, com PRIMARY KEY e FOREIGN KEY) a partir das
+// tabelas do Modelo Lógico -- tipos via fullDataType (mesma função usada no painel de colunas) e
+// restrições por coluna via sqlConstraintClause. Tabelas sem nenhuma tabela retornam "".
+function generateSqlFromLogicalModel(logical){
+  if (!logical || !Array.isArray(logical.nodes)) return "";
+  var tables = logical.nodes.filter(function(t){ return t.type === "table"; });
+  if (!tables.length) return "";
+  var byId = {};
+  tables.forEach(function(t){ byId[t.id] = t; });
+  var blocks = [];
+  tables.forEach(function(t){
+    var cols = t.columns || [];
+    var rows = [];
+    var pkCols = [];
+    var fkRows = [];
+    cols.forEach(function(c){
+      var inlineParts = [fullDataType(c)];
+      var comments = [];
+      (c.constraints || []).forEach(function(cst){
+        var clause = sqlConstraintClause(cst);
+        if (!clause) return;
+        if (clause.inline) inlineParts.push(clause.inline);
+        else if (clause.comment) comments.push(clause.comment);
+      });
+      rows.push({
+        clause: sqlIdent(c.name) + " " + inlineParts.join(" "),
+        comment: comments.length ? "restrição adicional: " + comments.join(", ") : ""
+      });
+      if (c.pk) pkCols.push(sqlIdent(c.name));
+      if (c.fk && c.fkTable){
+        var refTable = byId[c.fkTable];
+        if (refTable){
+          fkRows.push({
+            clause: "FOREIGN KEY (" + sqlIdent(c.name) + ") REFERENCES " + sqlIdent(refTable.name) + " (" + sqlIdent(c.fkColumn || "id") + ")",
+            comment: ""
+          });
+        }
+      }
+    });
+    if (pkCols.length) rows.push({ clause: "PRIMARY KEY (" + pkCols.join(", ") + ")", comment: "" });
+    rows = rows.concat(fkRows);
+    var body = rows.map(function(r, idx){
+      var isLast = idx === rows.length - 1;
+      return "  " + r.clause + (isLast ? "" : ",") + (r.comment ? "  -- " + r.comment : "");
+    }).join("\n");
+    blocks.push("CREATE TABLE " + sqlIdent(t.name) + " (\n" + body + "\n);");
+  });
+  return blocks.join("\n\n");
+}
+// Sincroniza a caixa de SQL do Modelo Físico com `physicalSql` (chamada ao entrar na visão --
+// ver enterPhysicalView -- e depois de qualquer alteração feita pela janela "Gerar modelo
+// físico"). A caixa é editável pelo usuário (ver o listener "input" em #sqlOutput); esta função
+// só empurra `physicalSql` para a tela, nunca o contrário.
+function renderPhysicalSql(){
+  var out = document.getElementById("sqlOutput");
+  if (!out) return;
+  out.value = physicalSql;
+  out.placeholder = logicalModel
+    ? 'Nenhum SQL gerado ainda — escolha "Sim" ao entrar no Modelo Físico para gerar a partir do modelo lógico, ou escreva/cole o SQL aqui.'
+    : "Ainda não existe um modelo lógico — crie tabelas na Modelagem Lógica antes de gerar o SQL.";
 }
 
 function rectBoundary(cx, cy, w, h, tx, ty){
@@ -3613,16 +3901,20 @@ function renderTablePanel(n){
   var otherTables = state.nodes.filter(function(t){ return t.type === "table" && t.id !== n.id; });
   (n.columns || []).forEach(function(c, i){
     // Pedido do usuario: cada parametro da coluna numa linha propria -- Nome; Tipo; Tamanho e
-    // Decimal juntos numa mesma linha; PK e FK juntos numa mesma linha (o botao de remover a
-    // coluna fica junto do nome, no topo, por ser a acao mais rapida de achar).
+    // Decimal juntos numa mesma linha; PK e FK juntos numa mesma linha. A alça de arraste e o
+    // botao de remover ficam sozinhos na linha do topo (acao mais rapida de achar), e o nome
+    // desce para a linha logo abaixo, junto com seu rotulo -- mesmo padrao de rotulo+campo usado
+    // por Tipo/Tam./Dec. mais abaixo.
     html += '<div class="col-row" data-row-i="' + i + '">';
-    html += '<div class="col-row-line col-row-name-line">';
+    html += '<div class="col-row-line col-row-handle-line">';
     html += '<span class="col-drag-handle" data-i="' + i + '" draggable="false" title="Arraste para reordenar a coluna" aria-label="Arraste para reordenar a coluna">' +
       '<svg viewBox="0 0 10 16"><circle cx="3" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="7" cy="3" r="1.4"/><circle cx="7" cy="8" r="1.4"/><circle cx="7" cy="13" r="1.4"/></svg>' +
       '</span>';
+    html += '<button type="button" class="col-del" data-i="' + i + '" title="Remover coluna">×</button>';
+    html += '</div>';
+    html += '<div class="col-row-line col-row-name-line">';
     html += '<span class="col-row-label">Nome</span>';
     html += '<input type="text" class="col-name" data-i="' + i + '" value="' + escapeHtml(c.name) + '" placeholder="nome">';
-    html += '<button type="button" class="col-del" data-i="' + i + '" title="Remover coluna">×</button>';
     html += '</div>';
     // O tipo (e o tamanho) de uma coluna FK nunca são digitados diretamente — eles sempre
     // espelham o tipo/tamanho da coluna referenciada (ver
@@ -3657,10 +3949,13 @@ function renderTablePanel(n){
       html += '</div>';
     }
     html += '<div class="col-row-line col-row-flags-line">';
+    html += '<span class="col-row-label">Chave</span>';
     html += '<label class="col-flag" title="Chave primária"><input type="checkbox" class="col-pk" data-i="' + i + '" ' + (c.pk ? "checked" : "") + '> PK</label>';
     html += '<label class="col-flag" title="Chave estrangeira"><input type="checkbox" class="col-fk" data-i="' + i + '" ' + (c.fk ? "checked" : "") + '> FK</label>';
     html += '</div>';
-    html += '</div>';
+    // Pedido do usuario: os objetos de tabela/campo referenciados pela chave estrangeira ficam
+    // DENTRO da janela da propria coluna (nao mais como um bloco solto logo depois dela), logo
+    // abaixo da linha das chaves (PK/FK).
     if (c.fk){
       html += '<div class="col-fk-refs">';
       if (otherTables.length){
@@ -3677,6 +3972,38 @@ function renderTablePanel(n){
       }
       html += '</div>';
     }
+    // Pedido do usuario: no final da configuração de cada coluna, um objeto de restrição (da lista
+    // cadastrada em "Gerenciar restrições") com os campos de parâmetro necessários, e um botão para
+    // adicionar mais restrições à mesma coluna (uma coluna pode ter mais de uma, ex.: UNIQUE + CHECK).
+    html += '<div class="col-constraints">';
+    (c.constraints || []).forEach(function(cst, ci){
+      var cParamCount = getConstraintParamCount(cst.name);
+      html += '<div class="col-constraint-row" data-i="' + i + '" data-ci="' + ci + '">';
+      html += '<select class="col-constraint-name" data-i="' + i + '" data-ci="' + ci + '">';
+      html += '<option value="">Restrição…</option>';
+      customConstraints.forEach(function(reg){
+        html += '<option value="' + escapeHtml(reg.name) + '"' + (cst.name === reg.name ? " selected" : "") + '>' + escapeHtml(reg.name) + '</option>';
+      });
+      // Restrição que a coluna já usa mas que não está (mais) cadastrada em "Gerenciar restrições"
+      // (excluída da lista, ou vinda de um projeto salvo em outro navegador) continua aparecendo
+      // como opção extra, para não trocar o valor da coluna sem o usuário pedir (mesmo padrão do
+      // combo de tipo de dado, ver typeOptions acima).
+      if (cst.name && !customConstraints.some(function(reg){ return reg.name === cst.name; })){
+        html += '<option value="' + escapeHtml(cst.name) + '" selected>' + escapeHtml(cst.name) + '</option>';
+      }
+      html += '</select>';
+      if (cParamCount >= 1){
+        html += '<input type="text" class="col-constraint-p1" data-i="' + i + '" data-ci="' + ci + '" value="' + escapeHtml(cst.p1 || "") + '" placeholder="parâmetro">';
+      }
+      if (cParamCount >= 2){
+        html += '<input type="text" class="col-constraint-p2" data-i="' + i + '" data-ci="' + ci + '" value="' + escapeHtml(cst.p2 || "") + '" placeholder="parâmetro 2">';
+      }
+      html += '<button type="button" class="col-constraint-del" data-i="' + i + '" data-ci="' + ci + '" title="Remover restrição">×</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<button type="button" class="col-constraint-add" data-i="' + i + '">+ Restrição</button>';
+    html += '</div>';
   });
   html += '</div><button type="button" class="hbtn" id="pf-col-add" style="margin-top:8px;width:100%;justify-content:center;">+ Adicionar coluna</button></div>';
   html += '<p class="hint">Tabela do modelo lógico — use "Conectar" na barra à esquerda para ligar duas tabelas e criar automaticamente uma coluna FK, ou marque FK numa coluna aqui e escolha a tabela/coluna referenciada. O tipo de uma coluna FK acompanha sempre o tipo da chave primária referenciada e só muda a partir dela.</p>';
@@ -3760,7 +4087,8 @@ function renderTablePanel(n){
   panelEl.querySelectorAll(".col-pk").forEach(function(chk){
     chk.addEventListener("change", function(e){
       var i = Number(chk.getAttribute("data-i"));
-      n.columns[i].pk = e.target.checked; render();
+      n.columns[i].pk = e.target.checked;
+      render();
     });
   });
   panelEl.querySelectorAll(".col-fk").forEach(function(chk){
@@ -3815,6 +4143,54 @@ function renderTablePanel(n){
       n.columns.splice(i, 1); render();
     });
   });
+  panelEl.querySelectorAll(".col-constraint-name").forEach(function(sel){
+    sel.addEventListener("change", function(e){
+      var i = Number(sel.getAttribute("data-i"));
+      var ci = Number(sel.getAttribute("data-ci"));
+      n.columns[i].constraints[ci].name = e.target.value;
+      render();
+    });
+  });
+  panelEl.querySelectorAll(".col-constraint-p1").forEach(function(inp){
+    inp.addEventListener("input", function(e){
+      var i = Number(inp.getAttribute("data-i"));
+      var ci = Number(inp.getAttribute("data-ci"));
+      n.columns[i].constraints[ci].p1 = e.target.value;
+      render();
+      var el = panelEl.querySelector('.col-constraint-p1[data-i="' + i + '"][data-ci="' + ci + '"]');
+      if (el){ el.focus(); el.setSelectionRange(e.target.value.length, e.target.value.length); }
+    });
+  });
+  panelEl.querySelectorAll(".col-constraint-p2").forEach(function(inp){
+    inp.addEventListener("input", function(e){
+      var i = Number(inp.getAttribute("data-i"));
+      var ci = Number(inp.getAttribute("data-ci"));
+      n.columns[i].constraints[ci].p2 = e.target.value;
+      render();
+      var el = panelEl.querySelector('.col-constraint-p2[data-i="' + i + '"][data-ci="' + ci + '"]');
+      if (el){ el.focus(); el.setSelectionRange(e.target.value.length, e.target.value.length); }
+    });
+  });
+  panelEl.querySelectorAll(".col-constraint-del").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var i = Number(btn.getAttribute("data-i"));
+      var ci = Number(btn.getAttribute("data-ci"));
+      n.columns[i].constraints.splice(ci, 1);
+      render();
+    });
+  });
+  panelEl.querySelectorAll(".col-constraint-add").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var i = Number(btn.getAttribute("data-i"));
+      var col = n.columns[i];
+      if (!col.constraints) col.constraints = [];
+      col.constraints.push({ name: "", p1: "", p2: "" });
+      render();
+      var sels = panelEl.querySelectorAll('.col-constraint-name[data-i="' + i + '"]');
+      var last = sels[sels.length - 1];
+      if (last) last.focus();
+    });
+  });
   // Arrastar e soltar para reordenar as colunas pela alça (⠿) de cada linha. Evita re-renderizar
   // o painel inteiro a cada pointermove (o que destruiria o elemento com o pointer capture no meio
   // do arraste) -- em vez disso, move as próprias linhas .col-row no DOM conforme o ponteiro passa
@@ -3837,19 +4213,10 @@ function renderTablePanel(n){
       // da primeira troca de posição. Ouvir no document, como o resto do app já faz para arrastar
       // nós/alças no quadro (ver comentário mais acima sobre pointercancel), evita esse problema.
 
-      // Uma coluna com FK marcado tem um bloco extra ".col-fk-refs" (tabela/coluna referenciada)
-      // logo depois da sua ".col-row" no DOM, como irmão -- não dentro dela. Para não separar esse
-      // bloco da linha à qual pertence ao reordenar (nem embaralhar o bloco de OUTRA coluna que por
-      // acaso esteja entre duas linhas), tratamos cada linha + seu ".col-fk-refs" (se houver) como
-      // uma unidade só, tanto ao decidir o ponto de inserção quanto ao mover a própria linha
-      // arrastada.
-      var rowFkRefs = row.nextElementSibling && row.nextElementSibling.classList.contains("col-fk-refs") ? row.nextElementSibling : null;
-      function unitAfter(rowEl){
-        var next = rowEl.nextElementSibling;
-        if (next && next.classList.contains("col-fk-refs")) next = next.nextElementSibling;
-        return next;
-      }
-
+      // O bloco ".col-fk-refs" (tabela/coluna referenciada da FK, quando houver) agora mora DENTRO
+      // da própria ".col-row" (ver renderTablePanel) -- então mover a linha já leva esse bloco
+      // junto automaticamente, sem precisar tratá-lo à parte como antes (quando ele era um irmão
+      // solto no DOM).
       function rowsNow(){ return Array.from(colListEl.querySelectorAll(".col-row")); }
 
       function onMove(ev){
@@ -3864,12 +4231,10 @@ function renderTablePanel(n){
           var mid = rect.top + rect.height / 2;
           if (k < rowIdx && y < mid){
             colListEl.insertBefore(row, sib);
-            if (rowFkRefs) colListEl.insertBefore(rowFkRefs, row.nextSibling);
             break;
           }
           if (k > rowIdx && y > mid){
-            colListEl.insertBefore(row, unitAfter(sib));
-            if (rowFkRefs) colListEl.insertBefore(rowFkRefs, row.nextSibling);
+            colListEl.insertBefore(row, sib.nextElementSibling);
             break;
           }
         }
@@ -3891,7 +4256,8 @@ function renderTablePanel(n){
   });
   document.getElementById("pf-col-add").addEventListener("click", function(){
     var varcharDefaults = getTypeDefaultParams("VARCHAR");
-    n.columns.push({ name:"coluna", dataType:"VARCHAR", dataSize: varcharDefaults.dataSize || "50", dataDecimals: varcharDefaults.dataDecimals || "", pk:false, fk:false, fkTable:null, fkColumn:null });
+    // Pedido do usuario: por padrão a nova coluna já vem com NOT NULL marcado.
+    n.columns.push({ name:"coluna", dataType:"VARCHAR", dataSize: varcharDefaults.dataSize || "50", dataDecimals: varcharDefaults.dataDecimals || "", pk:false, fk:false, fkTable:null, fkColumn:null, constraints:[] });
     render();
   });
   document.getElementById("pf-delete").addEventListener("click", function(){ deleteNode(n.id); render(); });
@@ -4095,7 +4461,7 @@ function alignBtn(kind, current, title){
 // Um projeto salvo agora guarda os dois modelos: { projectName, mode, conceptual, logical }.
 // buildProjectSnapshot() empacota o estado atual nesse formato para autosave/exportação.
 function buildProjectSnapshot(){
-  return { projectName: state.projectName, mode: mode, conceptual: conceptualModel, logical: logicalModel };
+  return { projectName: state.projectName, mode: mode, conceptual: conceptualModel, logical: logicalModel, physicalSql: physicalSql };
 }
 var autosaveTimer = null;
 function scheduleAutosave(){
@@ -4120,6 +4486,9 @@ function applyLoadedProject(parsedProject){
   logicalModel = (parsedProject.logical && Array.isArray(parsedProject.logical.nodes)) ? normalizeLoadedLogicalState(parsedProject.logical) : null;
   if (mode === "logical" && !logicalModel) mode = "conceptual"; // nunca fica em modo lógico sem um modelo lógico
   state = (mode === "logical") ? logicalModel : conceptualModel;
+  // Bug relatado pelo usuário: o SQL do Modelo Físico não estava sendo salvo -- restaura o texto
+  // salvo (projetos salvos antes desta correção não têm o campo, então fica vazio normalmente).
+  physicalSql = (typeof parsedProject.physicalSql === "string") ? parsedProject.physicalSql : "";
 }
 
 function loadInitialState(){
@@ -4262,7 +4631,19 @@ function normalizeLoadedLogicalState(parsed){
             pk: !!(c && c.pk), fk: !!(c && c.fk),
             fkTable: (c && c.fkTable) || null, fkColumn: (c && c.fkColumn) || null,
             cardChild: normalizeCard(c && c.cardChild),
-            cardParent: normalizeCard(c && c.cardParent)
+            cardParent: normalizeCard(c && c.cardParent),
+            // Bug relatado pelo usuário: as restrições de coluna (UNIQUE, CHECK, DEFAULT,
+            // IDENTITY etc. -- ver painel de colunas) não sobreviviam a um recarregamento da
+            // página nem a reabrir um .json salvo, porque esta função reconstrói cada coluna
+            // campo a campo e não estava copiando c.constraints -- ficava perdido silenciosamente
+            // mesmo já tendo sido gravado no autosave/arquivo. Corrigido reconstruindo o array.
+            constraints: Array.isArray(c && c.constraints) ? c.constraints.map(function(cst){
+              return {
+                name: String((cst && cst.name) || ""),
+                p1: String((cst && cst.p1) || ""),
+                p2: String((cst && cst.p2) || "")
+              };
+            }) : []
           };
         }) : []
       };
@@ -5319,10 +5700,18 @@ projectNameInput.addEventListener("input", function(e){
 /* ---------- alternar entre Modelagem Conceitual e Modelagem Lógica ---------- */
 var modeSelect = document.getElementById("modeSelect");
 function applyModeUI(){
-  modeSelect.value = mode;
+  modeSelect.value = physicalActive ? "physical" : mode;
   var isLogical = mode === "logical";
   document.getElementById("toolbarConceptual").hidden = isLogical;
   document.getElementById("toolbarLogical").hidden = !isLogical;
+  // Modelo Físico: some com a barra de ferramentas, o painel de propriedades e o quadro
+  // (svg#stage + zoom), e mostra o SQL gerado no lugar deles (ver renderPhysicalSql) -- não há
+  // nada para arrastar/selecionar/editar nessa visão, só o texto do SQL.
+  toolbarWrapEl.hidden = physicalActive;
+  panelWrapEl.hidden = physicalActive;
+  document.getElementById("stage").hidden = physicalActive;
+  document.getElementById("zoomCtl").hidden = physicalActive;
+  document.getElementById("sqlView").hidden = !physicalActive;
 }
 // Ao entrar em Modelagem Lógica: se ainda não existe um modelo lógico, gera um automaticamente
 // (nada a perder). Se já existe um, pergunta a cada vez o que fazer com ele — Sim: reconverte do
@@ -5338,8 +5727,8 @@ async function switchMode(target){
       showToast('Modelo lógico gerado automaticamente a partir do diagrama conceitual — os dois ficam guardados separadamente a partir de agora, então alternar entre eles não apaga suas edições.');
     } else {
       var choice = await askChoice3(
-        "Reconverter modelo lógico",
-        'Reconverter o modelo lógico a partir do diagrama conceitual atual? "Sim" descarta o modelo lógico existente (inclusive edições manuais) e gera um novo. "Não" abre o modelo lógico como ele está. "Limpar" esvazia o modelo lógico para você montá-lo manualmente do zero.',
+        "Gerar modelo lógico",
+        'Gerar o modelo lógico a partir do diagrama conceitual atual? "Sim" descarta o modelo lógico existente (inclusive edições manuais) e gera um novo. "Não" abre o modelo lógico como ele está. "Limpar" esvazia o modelo lógico para você montá-lo manualmente do zero.',
         [
           { key:"no", label:"Não", className:"primary", isCancel:true, isDefault:true },
           { key:"clear", label:"Limpar" },
@@ -5387,8 +5776,69 @@ async function switchMode(target){
   render();
   fitToContent();
 }
+// Pedido do usuário: "Modelo Físico" no mesmo seletor do topo -- ao ser escolhido, mostra a janela
+// "Gerar modelo físico" (Não/Limpar/Sim), MAS só quando já existe um modelo lógico (sem ele, não
+// há nada para gerar, então não pergunta nada e não gera nada). Diferente das janelas de
+// switchMode, aqui nenhuma das três opções toca no modelo conceitual nem no lógico -- elas mexem
+// só no texto do SQL (`physicalSql`), que é o que fica na caixa editável do Modelo Físico:
+// "Sim" gera o SQL a partir do modelo lógico atual (sobrescrevendo o que estiver na caixa),
+// "Não" mantém o SQL como estava (o último gerado, ou o que o usuário tiver editado à mão) e
+// "Limpar" apenas esvazia a caixa. Também não mexe em `mode`/`state`/seleção -- entrar no Físico
+// é puramente uma troca de VISÃO (ver applyModeUI), nunca uma troca de modo.
+async function enterPhysicalView(){
+  if (logicalModel){
+    var choice = await askChoice3(
+      "Gerar modelo físico",
+      'Gerar o código SQL a partir do modelo lógico atual? "Sim" gera o SQL agora, substituindo o que estiver na caixa. "Não" mantém o SQL mostrado da última vez (ou o que você tiver editado). "Limpar" apaga o conteúdo da caixa de SQL. Nenhuma dessas opções altera o modelo conceitual nem o modelo lógico — só o texto do SQL exibido.',
+      [
+        { key:"no", label:"Não", className:"primary", isCancel:true, isDefault:true },
+        { key:"clear", label:"Limpar" },
+        { key:"yes", label:"Sim", className:"dangerous" }
+      ]
+    );
+    if (choice === "yes"){
+      physicalSql = generateSqlFromLogicalModel(logicalModel);
+      scheduleAutosave();
+    } else if (choice === "clear"){
+      physicalSql = "";
+      scheduleAutosave();
+    }
+    // "não" (ou fechar clicando fora): mantém `physicalSql` exatamente como estava.
+  }
+  // Sem nenhum modelo lógico ainda: não pergunta nada e não gera nada -- só mostra a visão física
+  // com o que já estiver na caixa (provavelmente vazia).
+  physicalActive = true;
+  applyModeUI();
+  renderPhysicalSql();
+}
+function exitPhysicalView(target){
+  physicalActive = false;
+  if (target !== mode) switchMode(target);
+  else { applyModeUI(); render(); fitToContent(); }
+}
 modeSelect.addEventListener("change", function(){
-  switchMode(modeSelect.value === "logical" ? "logical" : "conceptual");
+  var v = modeSelect.value;
+  if (v === "physical") enterPhysicalView();
+  else exitPhysicalView(v === "logical" ? "logical" : "conceptual");
+});
+document.getElementById("btnCopySql").addEventListener("click", function(){
+  var text = document.getElementById("sqlOutput").value || "";
+  if (!text) return;
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){
+      showToast("SQL copiado para a área de transferência.");
+    }).catch(function(){
+      showToast("Não foi possível copiar automaticamente — selecione o texto manualmente.", "warn");
+    });
+  } else {
+    showToast("Não foi possível copiar automaticamente — selecione o texto manualmente.", "warn");
+  }
+});
+// Pedido do usuário: "A janela do SQL pode ser editado e alterado pelo usuário" -- mantém
+// `physicalSql` em sincronia com o que o usuário digita/cola na caixa, sem tocar no modelo lógico.
+document.getElementById("sqlOutput").addEventListener("input", function(e){
+  physicalSql = e.target.value;
+  scheduleAutosave();
 });
 
 /* ---------- tema claro/escuro ---------- */
@@ -5471,7 +5921,7 @@ async function downloadAppHtml(){
 document.getElementById("btnDownloadApp").addEventListener("click", downloadAppHtml);
 
 /* ---------- sobre / marca ---------- */
-var APP_VERSION = "1.0";
+var APP_VERSION = "2.0";
 // Tela "Sobre": acessível tanto pelo nome da marca no cabeçalho quanto pelo botão "Sobre" no
 // rodapé da barra de ferramentas (ver btnAbout mais abaixo) — as duas chamam esta mesma função,
 // para o conteúdo nunca ficar divergente entre os dois pontos de entrada.
@@ -5483,8 +5933,9 @@ function showAboutModal(){
       '<h2>Sobre o DER Fácil</h2>' +
       '<p>O DER Fácil é uma ferramenta para criar diagramas de modelagem de dados nas notações ' +
       'Entidade-Relacionamento (Chen), no modelo conceitual, e de tabelas, no modelo lógico/relacional — ' +
-      'com conversão automática de um para o outro. Foi pensado para uso didático em disciplinas de ' +
-      'banco de dados, ajudando professores e estudantes a desenhar, revisar e discutir modelos de dados.</p>' +
+      'com conversão automática do modelo conceitual para o modelo lógico, e do modelo lógico para o ' +
+      'modelo físico (geração do código SQL). Foi pensado para uso didático em disciplinas de banco de ' +
+      'dados, ajudando professores e estudantes a desenhar, revisar e discutir modelos de dados.</p>' +
       '<p><strong>Versão:</strong> ' + escapeHtml(APP_VERSION) + '<br>' +
       '<strong>Desenvolvedor:</strong> Fred Lucena</p>' +
       '<p class="hint">Esta ferramenta é fornecida como está, sem garantias de qualquer tipo. A ' +
@@ -5604,11 +6055,96 @@ document.getElementById("btnManageTypes").addEventListener("click", function(){
   openTypeManagementModal();
 });
 
+function openConstraintManagementModal(){
+  var backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-box">' +
+    '<h2>Restrições</h2>' +
+    '<p>Cadastre ou exclua as restrições que você costuma documentar nas tabelas e colunas do modelo lógico (ex.: UNIQUE, CHECK, DEFAULT), com uma descrição opcional explicando a regra e a quantidade de parâmetros que ela usa: 0 quando não precisa de nenhum (ex.: UNIQUE), 1 quando precisa de um (ex.: o valor de DEFAULT) ou 2 quando precisa de dois (ex.: a tabela e a coluna de uma FOREIGN KEY). Essa lista é só uma referência de consulta — cadastrar ou excluir uma restrição aqui não altera nenhuma coluna do diagrama.</p>' +
+    '<div class="type-mgmt-list" id="constraintMgmtList"></div>' +
+    '<div class="type-mgmt-add">' +
+      '<input type="text" id="constraintMgmtInput" placeholder="Nova restrição (ex.: UNIQUE)" maxlength="40">' +
+      '<select id="constraintMgmtParamsInput" class="type-mgmt-params-select" title="Quantidade de parâmetros desta restrição">' + paramCountSelectHtml(1) + '</select>' +
+      '<input type="text" id="constraintMgmtDescInput" placeholder="Descrição (opcional)" maxlength="120">' +
+      '<button type="button" class="hbtn" id="constraintMgmtAddBtn">+ Adicionar</button>' +
+    '</div>' +
+    '<div class="modal-actions"><button data-a="close" class="primary">Fechar</button></div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  function renderList(){
+    var listEl = document.getElementById("constraintMgmtList");
+    if (!listEl) return;
+    if (!customConstraints.length){
+      listEl.innerHTML = '<div class="type-mgmt-empty">Nenhuma restrição cadastrada.</div>';
+      return;
+    }
+    listEl.innerHTML = customConstraints.map(function(c){
+      return '<div class="type-mgmt-row">' +
+        '<div class="type-mgmt-row-main"><span>' + escapeHtml(c.name) + '</span>' +
+        '<select class="type-mgmt-params-select" data-name="' + escapeHtml(c.name) + '" title="Quantidade de parâmetros desta restrição">' + paramCountSelectHtml(c.params) + '</select>' +
+        '<button type="button" class="col-del" data-name="' + escapeHtml(c.name) + '" title="Excluir restrição">×</button></div>' +
+        '<div class="type-mgmt-row-defaults">' +
+          '<input type="text" class="type-mgmt-desc-input" data-name="' + escapeHtml(c.name) + '" value="' + escapeHtml(c.description || "") + '" placeholder="Descrição (opcional)" title="Descrição da restrição">' +
+        '</div>' +
+      '</div>';
+    }).join("");
+    listEl.querySelectorAll(".col-del[data-name]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        removeConstraint(btn.getAttribute("data-name"));
+        renderList();
+      });
+    });
+    listEl.querySelectorAll(".type-mgmt-params-select[data-name]").forEach(function(sel){
+      sel.addEventListener("change", function(){
+        setConstraintParams(sel.getAttribute("data-name"), sel.value);
+      });
+    });
+    listEl.querySelectorAll(".type-mgmt-desc-input[data-name]").forEach(function(inp){
+      inp.addEventListener("input", function(){
+        setConstraintDescription(inp.getAttribute("data-name"), inp.value);
+      });
+    });
+  }
+  renderList();
+
+  function tryAdd(){
+    var inp = document.getElementById("constraintMgmtInput");
+    var paramsSel = document.getElementById("constraintMgmtParamsInput");
+    var descInp = document.getElementById("constraintMgmtDescInput");
+    var name = (inp.value || "").trim();
+    if (!name){ showToast("Digite um nome de restrição para adicionar."); return; }
+    var upper = name.toUpperCase();
+    if (customConstraints.some(function(c){ return c.name.toUpperCase() === upper; })){
+      showToast("Essa restrição já está cadastrada.", "warn");
+      return;
+    }
+    addConstraint(name, descInp ? descInp.value : "", paramsSel ? paramsSel.value : 1);
+    inp.value = "";
+    if (descInp) descInp.value = "";
+    if (paramsSel) paramsSel.value = "1";
+    inp.focus();
+    renderList();
+  }
+  document.getElementById("constraintMgmtAddBtn").addEventListener("click", tryAdd);
+  document.getElementById("constraintMgmtInput").addEventListener("keydown", function(e){
+    if (e.key === "Enter"){ e.preventDefault(); tryAdd(); }
+  });
+
+  backdrop.addEventListener("click", function(e){ if (e.target === backdrop) backdrop.remove(); });
+  backdrop.querySelector('[data-a="close"]').addEventListener("click", function(){ backdrop.remove(); });
+}
+document.getElementById("btnManageConstraints").addEventListener("click", function(){
+  openConstraintManagementModal();
+});
+
 /* ---------- inicialização ---------- */
 isDarkTheme = computeInitialDarkTheme();
 applyTheme();
 loadPrefs();
 loadDataTypePrefs();
+loadConstraintPrefs();
 loadInitialState();
 projectNameInput.value = state.projectName;
 applyModeUI();
