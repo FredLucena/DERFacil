@@ -603,9 +603,9 @@
 </div>
 <script>
   // Tela de abertura: fundo preto com o logo girando lentamente, exibida por 2 segundos antes de
-  // liberar o app. Roda num <script> próprio, separado do script principal do app (que só é
-  // interpretado depois, mais abaixo no arquivo) para começar a contar o tempo assim que a página
-  // carrega, sem depender da inicialização do resto do app.
+  // liberar o app. Roda num bloco de script próprio, separado do script principal do app (que só
+  // é interpretado depois, mais abaixo no arquivo) para começar a contar o tempo assim que a
+  // página carrega, sem depender da inicialização do resto do app.
   (function(){
     var el = document.getElementById("splashOverlay");
     if (!el) return;
@@ -678,7 +678,7 @@
   <span class="autosave-note" id="autosaveNote"></span>
   <div class="spacer"></div>
   <!-- No desktop este agrupamento é invisível (display:contents -- ver regra ".header-actions"
-       mais acima no <style>), então os botões continuam soltos na mesma linha do cabeçalho,
+       mais acima no bloco de estilos), então os botões continuam soltos na mesma linha do cabeçalho,
        exatamente como antes. No celular ele vira uma faixa própria, colocada sozinha numa
        segunda linha (com rolagem horizontal caso não caibam todos de uma vez, em vez de
        quebrar para uma terceira linha) -- ver a media query em @media (max-width: 880px). -->
@@ -1095,7 +1095,7 @@ toolbarPinChk.addEventListener("change", function(){
 // ---------- gavetas no layout de celular ----------
 // Numa tela de celular, a barra de ferramentas e o painel de propriedades não cabem ao lado
 // do quadro (ver o "aside.toolbar"/"aside.panel-wrap" dentro do @media (max-width:880px) no
-// <style>) -- em vez disso, viram gavetas escondidas fora da tela por padrão, que deslizam por
+// bloco de estilos) -- em vez disso, viram gavetas escondidas fora da tela por padrão, que deslizam por
 // cima do quadro quando abertas por um botão no cabeçalho, e fecham tocando fora delas (no
 // fundo escurecido) ou ao escolher uma ferramenta.
 var mobileLayoutMQ = window.matchMedia("(max-width: 880px)");
@@ -1185,7 +1185,7 @@ function loadDataTypePrefs(){
 
 // Tema (claro/escuro): o CSS já segue sozinho a preferência do sistema operacional (media query
 // prefers-color-scheme). O atributo data-theme="light"/"dark" na raiz do documento tem prioridade
-// sobre essa media query (ver regras no <style>), então usá-lo é o suficiente para o botão fixar
+// sobre essa media query (ver regras no bloco de estilos), então usá-lo é o suficiente para o botão fixar
 // uma escolha explícita, que fica salva neste navegador para as próximas visitas.
 var isDarkTheme = false;
 function computeInitialDarkTheme(){
@@ -5135,12 +5135,12 @@ function buildExportSvgMarkup(){
   var rootCss = ":root{";
   varNames.forEach(function(v){ rootCss += v + ":" + rootStyles.getPropertyValue(v).trim() + ";"; });
   rootCss += "}";
-  // Usamos um id específico (em vez de document.querySelector("style"), que pegava só "o
-  // primeiro <style> da página") porque, quando publicado como Artifact do Claude, o próprio
-  // Claude injeta um <style> minúsculo dele no <head>, antes do nosso -- então "o primeiro
-  // style" deixou de ser o nosso bloco com as classes de cor (.shape-entity etc.), e a
-  // exportação em JPG/PDF saía com todas as formas pretas (sem as classes, os elementos SVG
-  // caem no preenchimento padrão preto). Com o id, sempre pegamos o <style> certo.
+  // Usamos um id específico (em vez de document.querySelector("style"), que pegava só o
+  // primeiro bloco de estilos da página) porque, quando publicado como Artifact do Claude, o
+  // próprio Claude injeta um bloco de estilos minúsculo dele na página, antes do nosso -- então
+  // "o primeiro bloco de estilos" deixou de ser o nosso, com as classes de cor (.shape-entity
+  // etc.), e a exportação em JPG/PDF saía com todas as formas pretas (sem as classes, os
+  // elementos SVG caem no preenchimento padrão preto). Com o id, sempre pegamos o bloco certo.
   var pageStyleEl = document.getElementById("appStyles") || document.querySelector("style");
   var styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
   styleEl.textContent = rootCss + "\n" + (pageStyleEl ? pageStyleEl.textContent : "");
