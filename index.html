@@ -816,7 +816,7 @@
         <label for="gridSizeInput">Espaçamento da grade</label>
         <div class="grid-size-row">
           <button type="button" id="gridSizeDown" title="Diminuir espaçamento">−</button>
-          <input type="number" id="gridSizeInput" min="10" max="100" step="2" value="26">
+          <input type="number" id="gridSizeInput" min="2" max="100" step="2" value="26">
           <button type="button" id="gridSizeUp" title="Aumentar espaçamento">+</button>
         </div>
       </div>
@@ -1011,7 +1011,7 @@ var undoLastSnapshot = null;     // último snapshot conhecido (usado para detec
 var undoSuppressed = false;      // true durante applySnapshotString(), para não gerar checkpoint da própria restauração
 var pendingAdd = null;           // {type, weak, identifying, kind}
 var spaceHeld = false;
-var GRID_SIZE_MIN = 10, GRID_SIZE_MAX = 100;
+var GRID_SIZE_MIN = 2, GRID_SIZE_MAX = 100;
 var GRID_SIZE = 26;              // espaçamento (em px do SVG) dos pontos do fundo e do encaixe ao arrastar
 var snapToGrid = true;
 function snapValue(v){ return Math.round(v / GRID_SIZE) * GRID_SIZE; }
@@ -1579,11 +1579,31 @@ function connectionInfo(a, b){
   return { ok:false, reason:"Essa conexão não é válida na notação Entidade-Relacionamento." };
 }
 
+// Reúne o próprio nó + todos os atributos ligados a ele (e, recursivamente, os sub-atributos deles,
+// no caso de uma composição) -- usado por deleteNode pra excluir a "árvore" inteira de atributos
+// junto, em vez de só desligar as arestas e deixar os nós de atributo abandonados, soltos e sem
+// nenhuma conexão no diagrama.
+function collectNodeWithAttributeDescendants(id){
+  var ids = new Set([id]);
+  var queue = [id];
+  while (queue.length){
+    var cur = getNode(queue.shift());
+    if (!cur) continue;
+    connectedAttributesOf(cur).forEach(function(a){
+      if (!ids.has(a.id)){ ids.add(a.id); queue.push(a.id); }
+    });
+  }
+  return ids;
+}
 function deleteNode(id){
-  var removedEdgeIds = state.edges.filter(function(e){ return e.from === id || e.to === id; }).map(function(e){ return e.id; });
-  state.nodes = state.nodes.filter(function(n){ return n.id !== id; });
-  state.edges = state.edges.filter(function(e){ return e.from !== id && e.to !== id; });
-  selectedNodeIds.delete(id);
+  // Ao excluir uma entidade (ou relacionamento, ou um atributo composto), seus atributos ligados
+  // saem junto -- eles não fazem sentido sozinhos, soltos no diagrama sem o elemento a que
+  // pertenciam.
+  var toRemove = collectNodeWithAttributeDescendants(id);
+  var removedEdgeIds = state.edges.filter(function(e){ return toRemove.has(e.from) || toRemove.has(e.to); }).map(function(e){ return e.id; });
+  state.nodes = state.nodes.filter(function(n){ return !toRemove.has(n.id); });
+  state.edges = state.edges.filter(function(e){ return !toRemove.has(e.from) && !toRemove.has(e.to); });
+  toRemove.forEach(function(nid){ selectedNodeIds.delete(nid); });
   removedEdgeIds.forEach(function(eid){ selectedEdgeIds.delete(eid); });
 }
 // No modelo lógico, uma "conexão" entre duas tabelas (edge.kind "fk") não é um dado próprio --
@@ -1790,7 +1810,50 @@ function boundaryPoint(node, dims, tx, ty){
   if (isBareAttr(node)) return rectBoundary(centerX(node, dims), node.y, dims.w, dims.h, tx, ty);
   return ellipseBoundary(node.x, node.y, dims.w, dims.h, tx, ty);
 }
-
+// Canto ESQUERDO da borda de cima/baixo de um atributo com lineAxis "v" (ver placeAttributeOnNode/
+// alignEntityAttributes/renderEdge) -- a linha toca a mesma borda ESQUERDA usada para alinhar os
+// nomes na pilha vertical (alignEntityAttributes, modos "esquerda"/"direita"), em vez do meio do
+// atributo, deixando o mesmo estilo de entrada (sempre pela esquerda) consistente em todos os
+// arranjos. "towardY" é a coordenada Y do outro lado da aresta, só pra decidir se a borda usada é a
+// de cima ou a de baixo do atributo.
+function attrVerticalLeftPoint(node, dims, towardY){
+  var leftX = isBareAttr(node) ? node.x : node.x - dims.w / 2;
+  var y = towardY < node.y ? node.y - dims.h / 2 : node.y + dims.h / 2;
+  return { x: leftX, y: y };
+}
+// Verifica se "x" cabe dentro da largura ATUAL de um nó, ou seja, se dá pra tocar a borda de
+// cima/baixo dele exatamente nessa coordenada sem "escapar" pra fora da forma -- usada como trava de
+// segurança antes de forçar a ponta do OUTRO lado de uma aresta pro mesmo X do atributo (ver
+// edgeTopBottomPointAtX/renderEdge): só entra em ação quando o X é mesmo válido pro nó do outro
+// lado (o caso normal depois de "Alinhar acima/abaixo", que já constrói esse X de propósito pra
+// caber -- ver alignEntityAttributes); nos demais casos (ex.: atributos bem espalhados, incluídos
+// pelo botão da barra, ou a entidade redimensionada depois do alinhamento) o cálculo padrão/já
+// existente continua sendo usado, sem mudança.
+function withinTopBottomRange(node, dims, x){
+  var cx = node.type === "attribute" ? centerX(node, dims) : node.x;
+  var hw = dims.w / 2;
+  return x >= cx - hw && x <= cx + hw;
+}
+// Ponto EXATO na borda de cima ou de baixo de um nó, numa coordenada X dada -- ao contrário de
+// boundaryPoint (que mira num alvo e pode tocar qualquer lado da forma pra alcançá-lo), aqui o X é
+// sempre respeitado à risca; só chamar depois que withinTopBottomRange confirmar que esse X cabe
+// dentro da largura do nó (ver comentário lá). "towardY" decide se é a borda de cima ou a de baixo
+// (a que encara o outro lado da aresta).
+function edgeTopBottomPointAtX(node, dims, x, towardY){
+  var top = towardY < node.y;
+  if (node.type === "relationship"){
+    var hw = dims.w / 2, hh = dims.h / 2, dx = x - node.x;
+    var dy = hh * (1 - Math.abs(dx) / hw);
+    return { x: x, y: top ? node.y - dy : node.y + dy };
+  }
+  if (node.type === "attribute" && !isBareAttr(node)){
+    var a = dims.w / 2, b = dims.h / 2, ddx = x - node.x;
+    var ratio = Math.max(0, 1 - (ddx * ddx) / (a * a));
+    var dy2 = b * Math.sqrt(ratio);
+    return { x: x, y: top ? node.y - dy2 : node.y + dy2 };
+  }
+  return { x: x, y: top ? node.y - dims.h / 2 : node.y + dims.h / 2 };
+}
 /* ---------- viewBox / pan / zoom ---------- */
 function applyViewBox(){
   stageEl.setAttribute("viewBox", view.x + " " + view.y + " " + view.w + " " + view.h);
@@ -1983,6 +2046,49 @@ function renderEdge(edge, dimsById){
   var da = dimsById[a.id], db = dimsById[b.id];
   var pa = boundaryPoint(a, da, centerX(b, db), b.y);
   var pb = boundaryPoint(b, db, centerX(a, da), a.y);
+  // Quando uma ponta é um atributo com "lineAxis" definido -- fica assim ao incluir um atributo
+  // pelo botão da barra, ou depois de "Alinhar à esquerda/direita/acima/abaixo" (ver
+  // placeAttributeOnNode/alignEntityAttributes) --, a PRÓPRIA ponta do atributo é recalculada, em
+  // vez do ponto que o cálculo padrão acima daria (que mira na posição real do OUTRO nó e, sempre
+  // que o atributo está deslocado do centro dele -- o caso comum aqui, já que os atributos de uma
+  // mesma coluna ficam espalhados na direção perpendicular -- toca a elipse/retângulo num ponto
+  // deslocado, fora do centro/nome). Eixo "h" (coluna ao LADO da entidade, alinhar à esquerda/
+  // direita): sai na mesma ALTURA do nome, pelo lado que encara a entidade (boundaryPoint com a
+  // própria altura forçada) -- não dá pra sempre usar a borda esquerda aqui, já que pra "esquerda"
+  // (entidade do lado OPOSTO) a linha teria que atravessar por cima do nome do atributo pra
+  // alcançá-la (os nós são desenhados por cima das arestas -- ver redrawStage --, e um atributo
+  // simples não tem preenchimento atrás do texto pra esconder esse trecho, então ficaria visível
+  // cortando o nome). Eixo "v" (coluna ACIMA/ABAIXO da entidade, alinhar acima/abaixo ou incluir
+  // pelo botão da barra): sai sempre pelo canto ESQUERDO da borda de cima/baixo
+  // (attrVerticalLeftPoint) -- aqui não há esse problema, pois a borda de cima/baixo usada já é
+  // sempre a que encara a entidade (só o X, dentro dela, é que fica à esquerda). O lado do OUTRO nó
+  // nunca é forçado: como os atributos de uma mesma coluna costumam se espalhar mais do que a
+  // largura/altura do nó ao qual se conectam, não existe em geral uma coordenada só que sirva ao
+  // mesmo tempo para as duas formas -- forçar as duas pontas quebraria a linha (ela deixaria de
+  // tocar de fato a borda de um dos dois lados). Com só a ponta do atributo forçada, a linha entra
+  // reta nele -- o que já deixa as linhas de uma mesma coluna visualmente organizadas e com a mesma
+  // "pegada" nos atributos, mesmo quando a única forma de tocar ambas as bordas de verdade é com um
+  // pequeno ângulo do lado do outro nó.
+  if (a.type === "attribute" && a.lineAxis){
+    pa = a.lineAxis === "v" ? attrVerticalLeftPoint(a, da, b.y) : boundaryPoint(a, da, b.x, a.y);
+  }
+  if (b.type === "attribute" && b.lineAxis){
+    pb = b.lineAxis === "v" ? attrVerticalLeftPoint(b, db, a.y) : boundaryPoint(b, db, a.x, b.y);
+  }
+  // Eixo "v" (acima/abaixo): quando o X onde o atributo toca cabe dentro da largura ATUAL do outro
+  // nó (withinTopBottomRange) -- o caso de "Alinhar acima/abaixo", que já constrói esse X de
+  // propósito pra caber (ver alignEntityAttributes) --, a ponta do OUTRO lado também é forçada pro
+  // mesmo X exato (edgeTopBottomPointAtX), deixando a linha inteira reta/vertical e com origem na
+  // borda do outro nó DISTRIBUÍDA (cada atributo da coluna toca um ponto diferente dela, em vez de
+  // sempre mirar o centro) -- ou seja, linhas paralelas entre si. Fora desse caso (ex.: atributos
+  // bem espalhados de placeAttributeOnNode, onde o X comumente não cabe) o outro lado continua com o
+  // cálculo padrão, sem mudança.
+  if (a.type === "attribute" && a.lineAxis === "v" && !(b.type === "attribute" && b.lineAxis) && withinTopBottomRange(b, db, pa.x)){
+    pb = edgeTopBottomPointAtX(b, db, pa.x, a.y);
+  }
+  if (b.type === "attribute" && b.lineAxis === "v" && !(a.type === "attribute" && a.lineAxis) && withinTopBottomRange(a, da, pb.x)){
+    pa = edgeTopBottomPointAtX(a, da, pb.x, b.y);
+  }
   var selected = selectedEdgeIds.has(edge.id);
 
   var g = svgEl("g", {});
@@ -2076,6 +2182,23 @@ function updateConnectedEdgeDom(nodeId){
     var da = a._dims || computeDims(a), db = b._dims || computeDims(b);
     var pa = boundaryPoint(a, da, centerX(b, db), b.y);
     var pb = boundaryPoint(b, db, centerX(a, da), a.y);
+    // Mesmo ajuste de "lineAxis" usado em renderEdge (ver lá o porquê) -- mantém a ponta do
+    // atributo entrando reta nele durante o próprio arraste (não só depois, no render() final),
+    // pra não "pular" de uma diagonal pra uma linha reta assim que o arraste termina.
+    if (a.type === "attribute" && a.lineAxis){
+      pa = a.lineAxis === "v" ? attrVerticalLeftPoint(a, da, b.y) : boundaryPoint(a, da, b.x, a.y);
+    }
+    if (b.type === "attribute" && b.lineAxis){
+      pb = b.lineAxis === "v" ? attrVerticalLeftPoint(b, db, a.y) : boundaryPoint(b, db, a.x, b.y);
+    }
+    // Mesmo ajuste de eixo "v" usado em renderEdge (ver lá o porquê) -- mantém a linha inteira reta,
+    // com origem distribuída na borda do outro nó, durante o próprio arraste.
+    if (a.type === "attribute" && a.lineAxis === "v" && !(b.type === "attribute" && b.lineAxis) && withinTopBottomRange(b, db, pa.x)){
+      pb = edgeTopBottomPointAtX(b, db, pa.x, a.y);
+    }
+    if (b.type === "attribute" && b.lineAxis === "v" && !(a.type === "attribute" && a.lineAxis) && withinTopBottomRange(a, da, pb.x)){
+      pa = edgeTopBottomPointAtX(a, da, pb.x, b.y);
+    }
     refs.line.setAttribute("x1", pa.x); refs.line.setAttribute("y1", pa.y);
     refs.line.setAttribute("x2", pb.x); refs.line.setAttribute("y2", pb.y);
     refs.hit.setAttribute("x1", pa.x); refs.hit.setAttribute("y1", pa.y);
@@ -2394,6 +2517,12 @@ function attachNodeHandlers(g, node){
       if (!moved){
         handleNodeClick(node, ev ? ev.shiftKey : false);
       } else {
+        // (Antes, um arraste manual apagava o "lineAxis" do atributo, pra linha não ficar "presa"
+        // numa posição qualquer -- mas como a força é sempre recalculada a partir da posição ATUAL
+        // dos dois nós a cada render (ver renderEdge), ela já se ajusta sozinha pra onde quer que o
+        // atributo seja arrastado, sem precisar apagar nada; apagar só causava o efeito contrário --
+        // a linha "pulava" pra um ponto fora do lugar depois de um arraste pequeno, mesmo dentro da
+        // mesma fileira/coluna.)
         render();
       }
     }
@@ -2718,17 +2847,33 @@ function connectedAttributesOf(node){
 }
 
 function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey){
-  var k = connectedAttributesOf(target).length;
-  var side = k === 0 ? 0 : (k % 2 === 1 ? Math.ceil(k / 2) : -Math.ceil(k / 2));
-  var spacing = 118;
   var targetDims = computeDims(target);
   var targetCx = centerX(target, targetDims);
-  var gap = targetDims.h / 2 + 90;
-  var ax = targetCx + side * spacing;
-  var ay = target.y - gap;
-  if (snapToGrid){ ax = snapValue(ax); ay = snapValue(ay); }
-  var attr = addNodeAt("attribute", { attrKind: kind, isKey: !!isKey }, ax, ay);
+  var mode = target.attrAlignMode || "top";
+  var existing = connectedAttributesOf(target);
+  // Posição inicial só serve de ponto de partida -- alignEntityAttributes (chamado logo abaixo)
+  // reorganiza IMEDIATAMENTE todo o grupo (os atributos já existentes + este novo), preservando o
+  // mesmo arranjo (acima/abaixo/esquerda/direita) já usado nessa entidade -- ou "acima" (o padrão
+  // histórico deste botão) se for o primeiro atributo dela -- em vez de simplesmente encaixar o
+  // novo do lado, que ia deixando o conjunto cada vez mais espalhado a cada inclusão. Como
+  // alignEntityAttributes agora ordena pelo Y ATUAL de cada atributo (pra respeitar um atributo que
+  // o usuário arrastou pra outro lugar -- ver lá), o novo precisa nascer claramente ALÉM de todos os
+  // já existentes (não só um pouco acima do alvo, que podia cair bem no meio deles por acaso) --
+  // assim ele sempre entra como o mais novo da pilha (no fim), nunca embaralhando os que já estavam
+  // organizados.
+  var ax = targetCx, ay;
+  if (mode === "left" || mode === "right"){
+    var maxY = existing.reduce(function(m, a){ return Math.max(m, a.y); }, target.y);
+    ay = maxY + 1000;
+  } else {
+    var maxDist = existing.reduce(function(m, a){ return Math.max(m, Math.abs(a.y - target.y)); }, 0);
+    ay = target.y - (maxDist + 1000);
+  }
+  // lineAxis "v": alignEntityAttributes ajusta esse valor de novo (pode virar "h" em "esquerda"/
+  // "direita"), mas já começa como "v" pra ficar coerente até lá.
+  var attr = addNodeAt("attribute", { attrKind: kind, isKey: !!isKey, lineAxis: "v" }, ax, ay);
   state.edges.push({ id: uid("ed"), from: target.id, to: attr.id, kind:"plain" });
+  alignEntityAttributes(target, mode);
   selectedNodeIds = new Set([ keepTargetSelected ? target.id : attr.id ]);
   selectedEdgeIds = new Set();
   if (stickyAdd) pendingAdd = stickyAdd;
@@ -2738,64 +2883,149 @@ function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey
 
 // ---------- organizar atributos de uma entidade (menu de contexto do botão direito) ----------
 // Reposiciona os atributos ligados diretamente a uma entidade em um dos quatro arranjos
-// escolhidos pelo usuário em showAttributeAlignMenu:
-//   "left"/"right"  -- empilhados verticalmente (um abaixo do outro), alinhados entre si pela
-//                      borda esquerda/direita, e ao LADO da entidade (esquerdo/direito) -- a
-//                      coluna fica centralizada na altura da entidade;
-//   "top"/"bottom"  -- lado a lado numa única linha, centralizados horizontalmente com a
-//                      entidade, ACIMA ou ABAIXO dela.
+// escolhidos pelo usuário em showAttributeAlignMenu -- todos empilham os atributos verticalmente
+// (um embaixo do outro), diferindo só em qual lado da entidade a coluna fica:
+//   "left"/"right" -- coluna ao LADO da entidade (esquerdo/direito), centralizada na ALTURA dela,
+//   com todos os atributos alinhados entre si pela mesma borda ESQUERDA comum (mesmo jeito de ler
+//   uma lista de nomes) -- a linha de cada um sai dessa borda, na própria altura (ver renderEdge).
+//   "top"/"bottom" -- coluna ACIMA/ABAIXO da entidade, centralizada na LARGURA dela, mas cada
+//   atributo com seu PRÓPRIO X, distribuído ao longo da borda da entidade (ver borderXs abaixo) --
+//   assim a linha de cada um toca um ponto diferente e exclusivo da borda, em vez de todas miradas
+//   no centro/numa coluna só, ficando paralelas entre si (ver edgeTopBottomPointAtX em renderEdge).
 // Só move os próprios atributos (não os nós ligados a eles, ex.: sub-atributos de uma
 // composição), do mesmo jeito que arrastar um nó no quadro nunca arrasta o que está ligado a ele.
 var ATTR_ALIGN_GAP = 70;      // distância da borda da entidade até o grupo de atributos
-var ATTR_ALIGN_ROW_STEP = 46; // espaçamento vertical entre atributos empilhados (alinhar à esquerda/direita)
-var ATTR_ALIGN_COL_GAP = 36;  // espaçamento horizontal entre atributos lado a lado (alinhar acima/abaixo)
+var ATTR_ALIGN_ROW_GAP = 4;   // espaço entre atributos empilhados, em qualquer um dos quatro modos
+var ATTR_ALIGN_BORDER_GAP = 10; // espaço entre os pontos vizinhos da borda, em "top"/"bottom", quando cabem soltos (ver borderXs)
+var ATTR_ALIGN_BORDER_MARGIN = 14; // margem entre o ponto mais externo e a quina da entidade, só quando o grupo não cabe solto e precisa espalhar pela largura dela
 function alignEntityAttributes(entity, mode){
   var attrs = connectedAttributesOf(entity);
   if (!attrs.length) return false;
-  var entityDims = computeDims(entity);
-  var dimsList = attrs.map(computeDims);
-  // Encaixa na grade só a coordenada de referência COMPARTILHADA por todo o grupo (a borda comum
-  // da coluna, ou a linha comum da fileira) -- nunca a posição de cada atributo em separado, já
-  // que um atributo composto/multivalorado/derivado é ancorado pelo centro (não pela borda, como
-  // um atributo simples) e encaixar os dois na grade de forma independente bagunçaria a borda/
-  // linha comum que é justamente o objetivo do alinhamento (a diferença iria parar no
-  // arredondamento -- ver também o cálculo de "maxDim" abaixo, que evita qualquer atributo do
-  // grupo esbarrar na entidade mesmo quando os atributos têm tamanhos bem diferentes entre si).
-  if (mode === "top" || mode === "bottom"){
-    var rowMaxHalfH = dimsList.reduce(function(m, d){ return Math.max(m, d.h / 2); }, 0);
-    var centerY = mode === "top"
-      ? entity.y - entityDims.h / 2 - ATTR_ALIGN_GAP - rowMaxHalfH
-      : entity.y + entityDims.h / 2 + ATTR_ALIGN_GAP + rowMaxHalfH;
-    if (snapToGrid) centerY = snapValue(centerY);
-    var totalW = dimsList.reduce(function(sum, d){ return sum + d.w; }, 0) + ATTR_ALIGN_COL_GAP * (attrs.length - 1);
-    var x = entity.x - totalW / 2;
-    if (snapToGrid) x = snapValue(x);
-    attrs.forEach(function(a, i){
-      var d = dimsList[i];
-      a.x = isBareAttr(a) ? x : x + d.w / 2;
-      a.y = centerY;
-      x += d.w + ATTR_ALIGN_COL_GAP;
-    });
-  } else {
-    // "left" ou "right": empilhados verticalmente ao LADO da entidade, todos com a mesma borda
-    // (esquerda ou direita) entre si -- a borda comum usa a largura do atributo mais largo do
-    // grupo, para que nenhum atributo (nem o mais largo) fique perto demais da entidade; os mais
-    // estreitos, com a mesma borda alinhada, ficam com mais folga ainda (efeito "irregular" normal
-    // de uma lista alinhada de um só lado). A coluna toda fica centralizada verticalmente na
-    // altura da entidade.
-    var maxW = dimsList.reduce(function(m, d){ return Math.max(m, d.w); }, 0);
-    var refX = mode === "right"
-      ? entity.x + entityDims.w / 2 + ATTR_ALIGN_GAP + maxW
-      : entity.x - entityDims.w / 2 - ATTR_ALIGN_GAP - maxW;
-    if (snapToGrid) refX = snapValue(refX);
-    var startY = entity.y - ((attrs.length - 1) * ATTR_ALIGN_ROW_STEP) / 2;
-    attrs.forEach(function(a, i){
-      var d = dimsList[i];
-      var leftX = mode === "right" ? refX - d.w : refX;
-      a.x = isBareAttr(a) ? leftX : leftX + d.w / 2;
-      a.y = startY + i * ATTR_ALIGN_ROW_STEP;
+  // Lembra a ordem usada da última vez (attrOrderIds) e se era o MESMO arranjo (attrAlignMode) --
+  // placeAttributeOnNode usa attrAlignMode pra reorganizar automaticamente todo o grupo (mantendo a
+  // mesma "estética") sempre que um novo atributo é incluído por ali.
+  var sameModeAsBefore = entity.attrAlignMode === mode;
+  entity.attrAlignMode = mode;
+  // Ordem-base: a lembrada da última vez (filtra os que já foram removidos, e acrescenta no fim os
+  // que ainda não apareciam nela -- recém-incluídos), ou a ordem de ligação (criação) se essa
+  // entidade nunca foi organizada antes.
+  var byId = {};
+  attrs.forEach(function(a){ byId[a.id] = a; });
+  var stored = Array.isArray(entity.attrOrderIds) ? entity.attrOrderIds : [];
+  var baseOrder = stored.map(function(id){ return byId[id]; }).filter(Boolean);
+  attrs.forEach(function(a){ if (baseOrder.indexOf(a) === -1) baseOrder.push(a); });
+  if (sameModeAsBefore){
+    // Reorganizando de novo no MESMO arranjo de antes (pelo menu, ou automaticamente ao incluir um
+    // novo atributo) -- aí sim respeita se o usuário arrastou algum deles pra outro lugar nesse meio
+    // tempo (ex.: pra ficar entre dois outros, ou mais perto/mais longe da entidade que um vizinho),
+    // reordenando pela posição ATUAL em vez de manter a ordem lembrada. "left"/"right": ordem de
+    // cima pra baixo pela altura (Y) atual, do jeito que a pilha é lida. "top"/"bottom": ordem do
+    // mais PRÓXIMO da entidade pro mais DISTANTE, pela distância (em Y) atual até ela -- mesma
+    // convenção do "order"/"borderIdx" mais abaixo. Só faz sentido comparar posições assim quando o
+    // arranjo já era esse mesmo antes -- trocar de "acima" pra "esquerda", por exemplo, não deve
+    // "herdar" uma ordem derivada de uma geometria completamente diferente; nesse caso a ordem
+    // lembrada é usada como está.
+    baseOrder = baseOrder.slice().sort(function(p, q){
+      if (mode === "left" || mode === "right") return p.y - q.y;
+      return Math.abs(p.y - entity.y) - Math.abs(q.y - entity.y);
     });
   }
+  attrs = baseOrder;
+  entity.attrOrderIds = attrs.map(function(a){ return a.id; });
+  var entityDims = computeDims(entity);
+  var dimsList = attrs.map(computeDims);
+  // Encaixa na grade só a(s) coordenada(s) de referência da coluna -- nunca a posição de cada
+  // atributo em separado, já que um atributo composto/multivalorado/derivado é ancorado pelo
+  // centro (não pela borda, como um atributo simples) e encaixar os dois na grade de forma
+  // independente bagunçaria o alinhamento que é justamente o objetivo aqui (a diferença iria parar
+  // no arredondamento).
+  //
+  // "left"/"right"/"top"/"bottom" usam a largura do atributo mais largo do grupo (maxW) só quando a
+  // coluna precisa "crescer para trás" pra não esbarrar na entidade ("left", e "top"/"bottom" pra
+  // saber quanto a coluna centralizada pode crescer); "right" não precisa, pois os atributos só
+  // crescem PARA LONGE da entidade.
+  var maxW = dimsList.reduce(function(m, d){ return Math.max(m, d.w); }, 0);
+  var leftEdgeX, borderXs;
+  if (mode === "right") leftEdgeX = entity.x + entityDims.w / 2 + ATTR_ALIGN_GAP;
+  else if (mode === "left") leftEdgeX = entity.x - entityDims.w / 2 - ATTR_ALIGN_GAP - maxW;
+  if (leftEdgeX !== undefined && snapToGrid) leftEdgeX = snapValue(leftEdgeX);
+  if (mode === "top" || mode === "bottom"){
+    // Um X por atributo. Por padrão ficam colados uns nos outros (só a folga fixa
+    // ATTR_ALIGN_BORDER_GAP entre um e o próximo, do mesmo jeito que ATTR_ALIGN_ROW_GAP faz na
+    // pilha vertical), centralizados na largura da entidade, em vez de espalhados forçadamente até
+    // as pontas dela -- fica compacto com poucos atributos numa entidade larga, sem jogá-los nas
+    // pontas. É esse mesmo X que vira, em renderEdge, tanto o canto esquerdo de saída do atributo
+    // (attrVerticalLeftPoint) quanto o ponto de chegada na borda da entidade
+    // (edgeTopBottomPointAtX) -- quando cabe dentro da largura real dela (ver
+    // withinTopBottomRange). Só quando o grupo "colado" não cabe de jeito nenhum dentro da largura
+    // da entidade (muitos atributos, ou entidade estreita) é que se volta a espalhar em partes
+    // iguais pela largura disponível dela (como antes), garantindo que TODOS os pontos continuem
+    // cabendo dentro dela -- senão os que "sobram" pra fora perderiam a linha reta até a própria
+    // borda (ver o "senão" em withinTopBottomRange) e podia até voltar a cruzar a caixa de outro
+    // atributo no caminho.
+    //
+    // A ordem da esquerda pra direita é sempre do atributo mais DISTANTE da entidade pro mais
+    // PRÓXIMO -- ou seja, sempre o inverso da ordem em que os atributos foram ligados a ela (ver o
+    // comentário grande mais abaixo, sobre "order"/"borderIdx", que explica por quê).
+    var farToNear = dimsList.map(function(_, k){ return k; }).reverse();
+    var widths = farToNear.map(function(k){ return dimsList[k].w; });
+    var naturalSpan = widths.reduce(function(s, w){ return s + w; }, 0) + ATTR_ALIGN_BORDER_GAP * (widths.length - 1);
+    var usableW = Math.max(0, entityDims.w - 2 * ATTR_ALIGN_BORDER_MARGIN);
+    if (widths.length === 1 || naturalSpan <= usableW){
+      var bx = entity.x - naturalSpan / 2;
+      borderXs = widths.map(function(w){
+        var x = snapToGrid ? snapValue(bx) : bx;
+        bx += w + ATTR_ALIGN_BORDER_GAP;
+        return x;
+      });
+    } else {
+      var startX = entity.x - usableW / 2;
+      borderXs = widths.map(function(_, i){
+        var x = startX + (usableW * i) / (widths.length - 1);
+        return snapToGrid ? snapValue(x) : x;
+      });
+    }
+  }
+  // O espaço entre um atributo e o próximo usa a altura real de cada um (ATTR_ALIGN_ROW_GAP só
+  // preenche a folga entre eles), em vez de um espaçamento fixo -- assim atributos simples (mais
+  // baixos, sem elipse) ficam bem próximos entre si, e um atributo maior (composto/multivalorado/
+  // derivado) no meio da pilha não fica espremido nem invade o vizinho.
+  var totalH = dimsList.reduce(function(sum, d){ return sum + d.h; }, 0) + ATTR_ALIGN_ROW_GAP * (attrs.length - 1);
+  var y;
+  if (mode === "left" || mode === "right") y = entity.y - totalH / 2; // coluna centralizada na altura da entidade
+  else if (mode === "top") y = entity.y - entityDims.h / 2 - ATTR_ALIGN_GAP - totalH; // termina logo acima da entidade
+  else y = entity.y + entityDims.h / 2 + ATTR_ALIGN_GAP; // "bottom": começa logo abaixo da entidade
+  // Em "top"/"bottom", o PRIMEIRO atributo (na ordem em que foi ligado à entidade) é sempre o mais
+  // PRÓXIMO dela, e o ÚLTIMO o mais DISTANTE -- do mesmo jeito nos dois modos, pra ficar consistente
+  // (ler a pilha de baixo/cima pra fora é sempre "do primeiro atributo pro último"). Como a pilha em
+  // "top" é MONTADA de trás pra frente (começa no topo, mais longe, e "termina" perto da entidade --
+  // ver "y" acima), pra que o primeiro atributo ainda saia mais PRÓXIMO nesse modo, ele precisa ser
+  // o ÚLTIMO a ser colocado na pilha -- daí "order" percorrer os atributos do último pro primeiro só
+  // em "top" (em "bottom" a pilha já é montada de perto pra longe, então a ordem natural já basta).
+  //
+  // O mais distante SEMPRE recebe o ponto mais à ESQUERDA da borda (borderXs[0]) e o mais próximo o
+  // mais à DIREITA -- em "top" isso já é a ordem natural (borderIdx=i); em "bottom" o índice usado
+  // em borderXs é invertido pra manter essa mesma regra (ver borderIdx abaixo). Isso importa porque
+  // a caixa de um atributo só cresce PARA A DIREITA a partir do seu próprio X (ver "a.x" abaixo):
+  // com o mais distante sempre no X mais à esquerda, a linha dele (que vai da borda da entidade até
+  // ele, passando pela altura de todos os mais próximos no caminho) nunca cai dentro da caixa de
+  // nenhum atributo mais próximo, já que a caixa de um atributo mais próximo nunca se estende pra
+  // ESQUERDA do seu próprio X, e todo atributo mais próximo tem um X maior que o do mais distante.
+  var order = attrs.map(function(_, k){ return k; });
+  if (mode === "top") order.reverse();
+  order.forEach(function(srcIdx, i){
+    var a = attrs[srcIdx];
+    var d = dimsList[srcIdx];
+    var borderIdx = mode === "bottom" ? (attrs.length - 1 - i) : i;
+    var x = (mode === "top" || mode === "bottom") ? borderXs[borderIdx] : leftEdgeX;
+    a.x = isBareAttr(a) ? x : x + d.w / 2;
+    a.y = y + d.h / 2;
+    y += d.h + ATTR_ALIGN_ROW_GAP;
+    // "left"/"right": coluna ao lado da entidade -> linha horizontal, na mesma altura do nome.
+    // "top"/"bottom": coluna acima/abaixo -> linha vertical, saindo do canto esquerdo do atributo
+    // (mesma borda usada pro alinhamento) -- ver attrVerticalLeftPoint em renderEdge.
+    a.lineAxis = (mode === "left" || mode === "right") ? "h" : "v";
+  });
   return true;
 }
 // Menu de contexto (botão direito sobre uma entidade com atributos) para escolher um dos quatro
@@ -2805,19 +3035,20 @@ function alignEntityAttributes(entity, mode){
 function showAttributeAlignMenu(entity){
   var backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  // Ícone "linha com itens de um lado dela" -- a linha representa a borda da entidade; os itens
-  // ficam acima (topIcon) ou abaixo dela (bottomIcon), mesma metáfora usada pelos ícones de
-  // alinhamento de texto (ALIGN_ICONS) para os outros dois, só que na horizontal.
+  // Ícone "linha com uma pilha de itens de um lado dela" -- a linha mais grossa representa a borda
+  // da entidade; a pilha (3 linhas finas, uma embaixo da outra) fica acima (topIcon) ou abaixo dela
+  // (bottomIcon), já que agora os atributos ficam empilhados verticalmente também acima/abaixo da
+  // entidade (mesmo jeito que ao lado dela -- ver ALIGN_ICONS.left/right logo abaixo).
   var topIcon = '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' +
-    '<rect x="1" y="1" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
-    '<rect x="6.5" y="1" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
-    '<rect x="12" y="1" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
-    '<line x1="1" y1="10.5" x2="15" y2="10.5"/></svg>';
+    '<line x1="4" y1="1" x2="12" y2="1"/>' +
+    '<line x1="4" y1="4.3" x2="12" y2="4.3"/>' +
+    '<line x1="4" y1="7.6" x2="12" y2="7.6"/>' +
+    '<line x1="1" y1="10.8" x2="15" y2="10.8" stroke-width="2.4"/></svg>';
   var bottomIcon = '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' +
-    '<line x1="1" y1="1.5" x2="15" y2="1.5"/>' +
-    '<rect x="1" y="5" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
-    '<rect x="6.5" y="5" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/>' +
-    '<rect x="12" y="5" width="3" height="6" rx="0.6" fill="currentColor" stroke="none"/></svg>';
+    '<line x1="1" y1="1.2" x2="15" y2="1.2" stroke-width="2.4"/>' +
+    '<line x1="4" y1="4.4" x2="12" y2="4.4"/>' +
+    '<line x1="4" y1="7.7" x2="12" y2="7.7"/>' +
+    '<line x1="4" y1="11" x2="12" y2="11"/></svg>';
   function itemHtml(key, title, desc, iconSvg){
     return '<button class="dl-menu-item" data-a="' + key + '">' + iconSvg +
       '<span><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml(desc) + '</small></span></button>';
@@ -2829,8 +3060,8 @@ function showAttributeAlignMenu(entity){
       '<div class="dl-menu-panel">' +
         itemHtml("left", "Alinhar à esquerda", "Um abaixo do outro, alinhados à esquerda, do lado esquerdo da entidade.", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.left + '</svg>') +
         itemHtml("right", "Alinhar à direita", "Um abaixo do outro, alinhados à direita, do lado direito da entidade.", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.right + '</svg>') +
-        itemHtml("top", "Alinhar na horizontal superior", "Lado a lado, centralizados, acima da entidade.", topIcon) +
-        itemHtml("bottom", "Alinhar na horizontal inferior", "Lado a lado, centralizados, abaixo da entidade.", bottomIcon) +
+        itemHtml("top", "Alinhar acima", "Um abaixo do outro, centralizados, acima da entidade.", topIcon) +
+        itemHtml("bottom", "Alinhar abaixo", "Um abaixo do outro, centralizados, abaixo da entidade.", bottomIcon) +
       '</div>' +
       '<div class="modal-actions"><button data-a="cancel">Cancelar</button></div>' +
     '</div>';
