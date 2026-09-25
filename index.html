@@ -1882,9 +1882,22 @@ function deleteSelection(){
 var clipboard = null;
 var pasteOffsetCount = 0;   // cresce a cada Ctrl+V seguido, para cada colagem aparecer um pouco deslocada da anterior
 
+// Pedido do usuário: "Quero que ao selecionar uma entidade, seus atributos também sejam
+// copiados." -- ao copiar, cada nó selecionado leva junto os atributos ligados a ele, mesmo que
+// eles não tenham sido selecionados à mão (e, recursivamente, os sub-atributos de uma composição)
+// -- mesmo critério já usado para arrastar (collectAttributeDescendants, ver "Ao mover uma
+// entidade...", perto de connectedAttributesOf) e para excluir (collectNodeWithAttributeDescendants,
+// perto de deleteNode). Vale tanto para entidade quanto para relacionamento (e para um atributo
+// composto copiado sozinho, que leva seus sub-atributos junto), pela mesma razão de consistência já
+// aplicada ao alinhamento/atalho de atributos -- e não precisa de nenhum caso especial: como as
+// arestas só entram no clipboard quando as DUAS pontas estão no conjunto copiado, as ligações
+// entidade->atributo (e atributo->sub-atributo) entram automaticamente junto.
 function copySelection(){
   if (selectedNodeIds.size === 0){ showToast("Selecione um ou mais elementos para copiar."); return; }
-  var idSet = selectedNodeIds;
+  var idSet = new Set(selectedNodeIds);
+  Array.from(selectedNodeIds).forEach(function(id){
+    collectAttributeDescendants(id).forEach(function(a){ idSet.add(a.id); });
+  });
   var nodes = state.nodes.filter(function(n){ return idSet.has(n.id); }).map(function(n){ return JSON.parse(JSON.stringify(n)); });
   var edges = state.edges.filter(function(e){ return idSet.has(e.from) && idSet.has(e.to); }).map(function(e){ return JSON.parse(JSON.stringify(e)); });
   clipboard = { mode:mode, nodes:nodes, edges:edges };
@@ -3280,13 +3293,34 @@ function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey
 //   no centro/numa coluna só, ficando paralelas entre si (ver edgeTopBottomPointAtX em renderEdge).
 // Só move os próprios atributos (não os nós ligados a eles, ex.: sub-atributos de uma
 // composição), do mesmo jeito que arrastar um nó no quadro nunca arrasta o que está ligado a ele.
-var ATTR_ALIGN_GAP = 70;      // distância da borda da entidade até o grupo de atributos
+// Distância padrão entre uma entidade/relacionamento e seus atributos (ver attrAlignGapFor, logo
+// abaixo, que escolhe entre as duas constantes conforme o tipo do nó) -- é a única distância
+// "padrão" controlável no app (a distância entre entidades/relacionamentos ligados diretamente por
+// "Conectar" é livre, definida por onde o usuário arrasta cada um), e, como todo atributo novo já
+// é organizado automaticamente (ver placeAttributeOnNode -> alignEntityAttributes, logo abaixo),
+// ela acaba valendo, na prática, para o comprimento do conector de quase todo atributo no diagrama.
+// Histórico de pedidos do usuário sobre esse valor, do mais antigo ao mais recente (o de
+// entidade->atributo parou na primeira redução; o de relacionamento->atributo já foi reduzido três
+// vezes, sempre pela metade da vez anterior):
+//   1) "Diminua pela metade o tamanho dos conectores entre os objetos" (a rodada seguinte
+//      corrigiu esse pedido, que tinha sido malinterpretado como espessura -- ver .edge-line no
+//      CSS, que ficou como estava): 70 -> 35, valor único para os dois tipos de nó.
+//   2) "Não era para alterar a espessura das linhas e sim o seu comprimento." + "Diminua pela
+//      metade o tamanho dos conectores entre as entidades e atributos e para 1/3 do tamanho, a
+//      distância entre relacionamentos e atributos.": o valor se divide em dois -- entidade 35/2
+//      (17.5, nunca mais mudou) e relacionamento 35/3 (~11.67).
+//   3) "Diminua pela metade o tamanho dos conectores entre os relacionamentos e atributos"
+//      (pedido repetido duas vezes seguidas): relacionamento 35/3 -> 35/6 (~5.83) -> 35/12 (~2.92).
+var ATTR_ALIGN_GAP_ENTITY = 35 / 2;         // entidade -> atributo: 17.5
+var ATTR_ALIGN_GAP_RELATIONSHIP = 35 / 12;  // relacionamento -> atributo: ~2.92
+function attrAlignGapFor(node){ return node.type === "relationship" ? ATTR_ALIGN_GAP_RELATIONSHIP : ATTR_ALIGN_GAP_ENTITY; }
 var ATTR_ALIGN_ROW_GAP = 4;   // espaço entre atributos empilhados, em qualquer um dos quatro modos
 var ATTR_ALIGN_BORDER_GAP = 10; // espaço entre os pontos vizinhos da borda, em "top"/"bottom", quando cabem soltos (ver borderXs)
 var ATTR_ALIGN_BORDER_MARGIN = 14; // margem entre o ponto mais externo e a quina da entidade, só quando o grupo não cabe solto e precisa espalhar pela largura dela
 function alignEntityAttributes(entity, mode){
   var attrs = connectedAttributesOf(entity);
   if (!attrs.length) return false;
+  var attrGap = attrAlignGapFor(entity);
   // Lembra a ordem usada da última vez (attrOrderIds) e se era o MESMO arranjo (attrAlignMode) --
   // placeAttributeOnNode usa attrAlignMode pra reorganizar automaticamente todo o grupo (mantendo a
   // mesma "estética") sempre que um novo atributo é incluído por ali.
@@ -3332,8 +3366,8 @@ function alignEntityAttributes(entity, mode){
   // crescem PARA LONGE da entidade.
   var maxW = dimsList.reduce(function(m, d){ return Math.max(m, d.w); }, 0);
   var leftEdgeX, borderXs;
-  if (mode === "right") leftEdgeX = entity.x + entityDims.w / 2 + ATTR_ALIGN_GAP;
-  else if (mode === "left") leftEdgeX = entity.x - entityDims.w / 2 - ATTR_ALIGN_GAP - maxW;
+  if (mode === "right") leftEdgeX = entity.x + entityDims.w / 2 + attrGap;
+  else if (mode === "left") leftEdgeX = entity.x - entityDims.w / 2 - attrGap - maxW;
   if (leftEdgeX !== undefined && snapToGrid) leftEdgeX = snapValue(leftEdgeX);
   if (mode === "top" || mode === "bottom"){
     // Um X por atributo. Por padrão ficam colados uns nos outros (só a folga fixa
@@ -3379,8 +3413,8 @@ function alignEntityAttributes(entity, mode){
   var totalH = dimsList.reduce(function(sum, d){ return sum + d.h; }, 0) + ATTR_ALIGN_ROW_GAP * (attrs.length - 1);
   var y;
   if (mode === "left" || mode === "right") y = entity.y - totalH / 2; // coluna centralizada na altura da entidade
-  else if (mode === "top") y = entity.y - entityDims.h / 2 - ATTR_ALIGN_GAP - totalH; // termina logo acima da entidade
-  else y = entity.y + entityDims.h / 2 + ATTR_ALIGN_GAP; // "bottom": começa logo abaixo da entidade
+  else if (mode === "top") y = entity.y - entityDims.h / 2 - attrGap - totalH; // termina logo acima da entidade
+  else y = entity.y + entityDims.h / 2 + attrGap; // "bottom": começa logo abaixo da entidade
   // Em "top"/"bottom", o PRIMEIRO atributo (na ordem em que foi ligado à entidade) é sempre o mais
   // PRÓXIMO dela, e o ÚLTIMO o mais DISTANTE -- do mesmo jeito nos dois modos, pra ficar consistente
   // (ler a pilha de baixo/cima pra fora é sempre "do primeiro atributo pro último"). Como a pilha em
