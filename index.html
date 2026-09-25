@@ -109,12 +109,14 @@
     cursor:pointer;
   }
   .brand .tag{ font-size:11.5px; color:var(--ink-soft); }
-  .mode-select{
+  .mode-menu-btn{
+    display:inline-flex; align-items:center; gap:5px;
     font-size:11.5px; color:var(--ink-soft); background:transparent;
     border:1px solid transparent; border-radius:5px; padding:3px 4px; cursor:pointer;
   }
-  .mode-select:hover{ border-color:var(--border); background:var(--surface-2); }
-  .mode-select:focus{ outline:none; border-color:var(--select); }
+  .mode-menu-btn:hover{ border-color:var(--border); background:var(--surface-2); }
+  .mode-menu-btn:focus{ outline:none; border-color:var(--select); }
+  .mode-menu-btn .dl-menu-caret{ color:var(--ink-soft); }
   header input#projectName{
     background:transparent; border:1px solid transparent; border-radius:6px;
     padding:5px 8px; font-family:var(--font-display); font-weight:600; font-size:15px;
@@ -167,6 +169,18 @@
     border-bottom:1px solid var(--border-soft); border-radius:0; margin-bottom:3px;
   }
   .dl-menu-back svg{ width:13px; height:13px; margin-top:0; }
+  /* Divisória entre um grupo de itens e outro dentro de um .dl-menu (ex.: entre os três modelos
+     e os itens "Gerar Modelo X" no menu de modelo -- ver renderModeMenuPanel). */
+  .dl-menu-divider{ border:none; border-top:1px solid var(--border-soft); margin:5px 3px; }
+  /* Menu de modelo (conceitual/lógico/físico): itens de texto simples, sem ícone -- usa
+     align-items:center (em vez do flex-start padrão de .dl-menu-item, pensado para ícone+texto
+     em duas linhas) e uma largura mais estreita, já que os rótulos são curtos. O item
+     correspondente à tela atual fica destacado (mesmo tratamento visual do botão ativo na barra
+     de ferramentas, .tbtn.active), para o usuário saber onde está sem precisar ler o rótulo do
+     botão que abre o menu. */
+  .mode-menu{ width:220px; }
+  .mode-menu-item{ align-items:center; font-size:13px; }
+  .mode-menu-item.active{ background:var(--accent-fill); color:var(--accent-ink); font-weight:600; }
 
   main{ flex:1; display:flex; min-height:0; }
 
@@ -716,11 +730,22 @@
 <header>
   <div class="brand">
     <span class="mark" id="brandMark" title="Sobre o DER Fácil">DER Fácil</span>
-    <select id="modeSelect" class="mode-select" title="Alternar entre modelagem conceitual, lógica e o modelo físico (SQL)">
-      <option value="conceptual">Modelagem Conceitual</option>
-      <option value="logical">Modelagem Lógica</option>
-      <option value="physical">Modelo Físico</option>
-    </select>
+    <!-- Pedido do usuário: o seletor de modelo (antes um <select> simples) precisa mostrar uma
+         divisória e itens extras ("Gerar Modelo X") que variam conforme a tela atual -- algo que
+         um <select> nativo não representa bem entre navegadores. Segue o mesmo padrão do menu
+         "Projeto" (.dl-menu-wrap/.dl-menu/.dl-menu-item) mais abaixo no cabeçalho, mas com um
+         botão mais discreto (.mode-menu-btn, no lugar de .hbtn) para manter o visual sutil que o
+         <select> tinha ao lado do nome do app. O conteúdo do painel (#modeMenuPanel) é montado
+         dinamicamente pelo JS (ver renderModeMenuPanel), já que os itens dependem da tela atual. -->
+    <div class="dl-menu-wrap mode-menu-wrap" id="modeMenuWrap">
+      <button type="button" class="mode-menu-btn" id="btnModeMenu" aria-haspopup="true" aria-expanded="false" title="Alternar entre o modelo conceitual, o lógico e o físico (SQL)">
+        <span id="modeMenuLabel">Modelo Conceitual</span>
+        <svg class="dl-menu-caret" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="dl-menu mode-menu" id="modeMenu" hidden>
+        <div class="dl-menu-panel" id="modeMenuPanel"></div>
+      </div>
+    </div>
   </div>
   <input id="projectName" type="text" value="" spellcheck="false">
   <!-- Duas faixas elásticas iguais (flex:1) em volta da mensagem de autosave dividem igualmente
@@ -2058,15 +2083,14 @@ function generateSqlFromLogicalModel(logical){
   return blocks.join("\n\n");
 }
 // Sincroniza a caixa de SQL do Modelo Físico com `physicalSql` (chamada ao entrar na visão --
-// ver enterPhysicalView -- e depois de qualquer alteração feita pela janela "Gerar modelo
-// físico"). A caixa é editável pelo usuário (ver o listener "input" em #sqlOutput); esta função
-// só empurra `physicalSql` para a tela, nunca o contrário.
+// ver enterPhysicalView). A caixa é editável pelo usuário (ver o listener "input" em #sqlOutput);
+// esta função só empurra `physicalSql` para a tela, nunca o contrário.
 function renderPhysicalSql(){
   var out = document.getElementById("sqlOutput");
   if (!out) return;
   out.value = physicalSql;
   out.placeholder = logicalModel
-    ? 'Nenhum SQL gerado ainda — escolha "Sim" ao entrar no Modelo Físico para gerar a partir do modelo lógico, ou escreva/cole o SQL aqui.'
+    ? "Nenhum SQL gerado ainda — crie ao menos uma tabela na Modelagem Lógica para gerar o SQL automaticamente, ou escreva/cole o SQL aqui."
     : "Ainda não existe um modelo lógico — crie tabelas na Modelagem Lógica antes de gerar o SQL.";
 }
 
@@ -2749,6 +2773,17 @@ function attachNodeHandlers(g, node){
     // Se o nó clicado já faz parte de uma seleção múltipla, arrasta o grupo inteiro junto;
     // caso contrário, arrasta só este nó (sem alterar a seleção atual).
     var groupIds = (selectedNodeIds.has(node.id) && selectedNodeIds.size > 1) ? Array.from(selectedNodeIds) : [node.id];
+    // Pedido do usuário: mover uma entidade também move os atributos ligados a ela (direta ou
+    // indiretamente -- um atributo composto leva seus próprios sub-atributos junto), sem
+    // precisar selecioná-los antes. Vale tanto para o arraste de um nó só quanto para o de uma
+    // seleção múltipla (inclui os atributos de CADA nó do grupo).
+    var groupIdSet = {};
+    groupIds.forEach(function(id){ groupIdSet[id] = true; });
+    groupIds.slice().forEach(function(id){
+      collectAttributeDescendants(id).forEach(function(a){
+        if (!groupIdSet[a.id]){ groupIdSet[a.id] = true; groupIds.push(a.id); }
+      });
+    });
     var startPositions = {};
     groupIds.forEach(function(id){
       var gn = getNode(id);
@@ -2819,9 +2854,13 @@ function attachNodeHandlers(g, node){
     document.addEventListener("pointercancel", finish);
   });
 
-  // Botão direito sobre uma entidade: seleciona ela e, se já tiver atributos ligados, abre o menu
-  // para reorganizá-los (ver showAttributeAlignMenu) em vez do menu de contexto padrão do navegador.
-  if (node.type === "entity"){
+  // Botão direito sobre uma entidade OU um relacionamento: seleciona ele e, se já tiver atributos
+  // ligados, abre o menu para reorganizá-los (ver showAttributeAlignMenu) em vez do menu de
+  // contexto padrão do navegador. Pedido do usuário: "Gostaria que o recurso de alinhamento de
+  // atributos que funciona na entidade, funcionasse também no relacionamento." -- a lógica de
+  // alinhamento (alignEntityAttributes/computeDims/boundaryPoint) já era genérica o bastante para
+  // qualquer tipo de nó; só faltava liberar aqui a abertura do menu para relacionamentos também.
+  if (node.type === "entity" || node.type === "relationship"){
     g.addEventListener("contextmenu", function(e){
       e.preventDefault();
       e.stopPropagation();
@@ -2831,12 +2870,33 @@ function attachNodeHandlers(g, node){
       render();
       var attrs = connectedAttributesOf(node);
       if (!attrs.length){
-        showToast('A entidade "' + (node.name || "") + '" não tem atributos para organizar.', "warn");
+        showToast(noAttrsToOrganizeMsg(node), "warn");
         return;
       }
       showAttributeAlignMenu(node);
     });
   }
+}
+// Mensagem de aviso quando o elemento (entidade ou relacionamento) clicado com o botão direito
+// não tem nenhum atributo ligado pra organizar -- extraída à parte porque agora é usada tanto
+// aqui (menu de contexto) quanto no atalho de teclado Ctrl+A (ver mais abaixo).
+function noAttrsToOrganizeMsg(node){
+  return node.type === "relationship"
+    ? 'O relacionamento "' + (node.name || "") + '" não tem atributos para organizar.'
+    : 'A entidade "' + (node.name || "") + '" não tem atributos para organizar.';
+}
+// Dica exibida no painel de propriedades (barra da direita) da entidade/relacionamento, com a
+// orientação de como alinhar os atributos ligados a ele -- tanto pelo botão direito (mouse) quanto
+// pelo atalho de teclado. Pedido do usuário: "Coloque na barra da direita, junto com a orientação
+// do alinhamento, o conjunto de teclas para alinhamento." Usada tanto para entidade quanto para
+// relacionamento (ver updatePanel), já que o recurso de alinhamento funciona para os dois.
+function attributeAlignHintHtml(nodeType){
+  var isRel = nodeType === "relationship";
+  var artigo = isRel ? "o relacionamento" : "a entidade";
+  var pronome = isRel ? "ele" : "ela";
+  return '<p class="hint">Dica: clique com o botão direito sobre ' + artigo + ' para alinhar automaticamente os atributos ligados a ' + pronome +
+    ' (à esquerda, à direita, acima ou abaixo d' + pronome + '). Atalho de teclado: Ctrl+A e, em seguida, E, D, C ou B ' +
+    '(esquerda, direita, acima, abaixo) -- ou só Ctrl+A sozinho para passar para o próximo alinhamento da sequência.</p>';
 }
 
 function handleNodeClick(node, additive){
@@ -3133,6 +3193,35 @@ function connectedAttributesOf(node){
   });
   return result;
 }
+// Pedido do usuário: "Ao mover uma entidade, desejo que os atributos da entidade também sejam
+// movidos." -- usada por attachNodeHandlers (arraste) para incluir, além do nó arrastado, todos
+// os atributos ligados a ele, direta ou indiretamente (percorre a cadeia inteira, então um
+// atributo composto arrasta seus próprios sub-atributos também), sem precisar selecioná-los à
+// mão antes. Ao contrário de connectedAttributesOf (só um passo), esta percorre recursivamente
+// a partir de rootId -- mas sempre PARA BAIXO na árvore: só segue para outro nó do tipo
+// "attribute", nunca de volta para a entidade/relacionamento dono ou para outro atributo irmão
+// que não seja descendente, então arrastar um atributo (que não tem descendentes, a não ser que
+// seja composto) continua não arrastando a entidade nem os demais atributos dela.
+function collectAttributeDescendants(rootId){
+  var result = [];
+  var visited = {};
+  visited[rootId] = true;
+  var frontier = [rootId];
+  while (frontier.length){
+    var curId = frontier.shift();
+    state.edges.forEach(function(e){
+      if (e.kind !== "plain") return;
+      var otherId = e.from === curId ? e.to : (e.to === curId ? e.from : null);
+      if (!otherId || visited[otherId]) return;
+      var other = getNode(otherId);
+      if (!other || other.type !== "attribute") return;
+      visited[otherId] = true;
+      result.push(other);
+      frontier.push(otherId);
+    });
+  }
+  return result;
+}
 
 function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey){
   var targetDims = computeDims(target);
@@ -3316,6 +3405,45 @@ function alignEntityAttributes(entity, mode){
   });
   return true;
 }
+// Atalhos de teclado para o alinhamento de atributos (pedido do usuário): "Com uma entidade
+// selecionada, gostaria que as teclas de atalho tivessem a seguinte correspondência: ctrl + ae
+// (Alinha atributos a esquerda); ctrl + ad (Alinha atributos a direita); ctrl + ac (Alinha
+// atributos acima); ctrl + ab (Alinha atributos abaixo); ctrl + a (Aplica os tipos de alinhamento
+// na sequência a cada aplicação do atalho)." -- estendido também a relacionamentos, pelo mesmo
+// motivo que o menu de contexto (botão direito) já foi: a lógica de alinhamento é a mesma. Ver o
+// tratamento de "keydown" mais abaixo, que reconhece essa sequência de duas teclas.
+var ALIGN_SHORTCUT_KEYS = { e: "left", d: "right", c: "top", b: "bottom" };
+var ALIGN_SHORTCUT_CYCLE = ["left", "right", "top", "bottom"];
+var alignShortcutPending = null; // { node, timer } -- enquanto se aguarda a segunda letra (E/D/C/B) após Ctrl+A
+function clearAlignShortcutPending(){
+  if (alignShortcutPending && alignShortcutPending.timer) clearTimeout(alignShortcutPending.timer);
+  alignShortcutPending = null;
+}
+// Elemento-alvo do atalho: só faz sentido com exatamente um elemento selecionado (entidade ou
+// relacionamento), do mesmo jeito que o menu de contexto só abre nesse caso.
+function getAlignShortcutTarget(){
+  if (pendingAdd || connectMode) return null;
+  if (selectedNodeIds.size !== 1 || selectedEdgeIds.size) return null;
+  var node = getNode(Array.from(selectedNodeIds)[0]);
+  if (!node || (node.type !== "entity" && node.type !== "relationship")) return null;
+  return node;
+}
+function applyAttributeAlignShortcut(node, mode){
+  if (!alignEntityAttributes(node, mode)){
+    showToast(noAttrsToOrganizeMsg(node), "warn");
+    return;
+  }
+  render();
+  showToast("Atributos organizados.");
+}
+// Ctrl+A sozinho (sem a segunda letra chegar a tempo): aplica o próximo arranjo da sequência
+// esquerda -> direita -> acima -> abaixo -> esquerda..., a cada nova aplicação do atalho -- não
+// necessariamente o "esquerda" sempre, pra ficar consistente com apertar Ctrl+A repetidas vezes.
+function applyAttributeAlignCycleShortcut(node){
+  var curIdx = ALIGN_SHORTCUT_CYCLE.indexOf(node.attrAlignMode);
+  var nextMode = ALIGN_SHORTCUT_CYCLE[(curIdx + 1) % ALIGN_SHORTCUT_CYCLE.length];
+  applyAttributeAlignShortcut(node, nextMode);
+}
 // Menu de contexto (botão direito sobre uma entidade com atributos) para escolher um dos quatro
 // arranjos acima. Segue o mesmo padrão visual de askChoice3/askConfirm (modal-backdrop criado na
 // hora e removido ao final), mas com as opções em lista vertical (como o menu "Projeto") em vez de
@@ -3341,15 +3469,18 @@ function showAttributeAlignMenu(entity){
     return '<button class="dl-menu-item" data-a="' + key + '">' + iconSvg +
       '<span><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml(desc) + '</small></span></button>';
   }
+  // Texto das descrições: concorda em gênero/artigo com o tipo do nó, já que este menu agora
+  // também abre para relacionamentos ("do relacionamento"), não só entidades ("da entidade").
+  var doNo = entity.type === "relationship" ? "do relacionamento" : "da entidade";
   backdrop.innerHTML =
     '<div class="modal-box">' +
       '<h2>Organizar atributos</h2>' +
       '<p>Escolha como os atributos de "' + escapeHtml(entity.name || "") + '" devem ficar dispostos no diagrama.</p>' +
       '<div class="dl-menu-panel">' +
-        itemHtml("left", "Alinhar à esquerda", "Um abaixo do outro, alinhados à esquerda, do lado esquerdo da entidade.", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.left + '</svg>') +
-        itemHtml("right", "Alinhar à direita", "Um abaixo do outro, alinhados à direita, do lado direito da entidade.", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.right + '</svg>') +
-        itemHtml("top", "Alinhar acima", "Um abaixo do outro, centralizados, acima da entidade.", topIcon) +
-        itemHtml("bottom", "Alinhar abaixo", "Um abaixo do outro, centralizados, abaixo da entidade.", bottomIcon) +
+        itemHtml("left", "Alinhar à esquerda", "Um abaixo do outro, alinhados à esquerda, do lado esquerdo " + doNo + ".", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.left + '</svg>') +
+        itemHtml("right", "Alinhar à direita", "Um abaixo do outro, alinhados à direita, do lado direito " + doNo + ".", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.right + '</svg>') +
+        itemHtml("top", "Alinhar acima", "Um abaixo do outro, centralizados, acima " + doNo + ".", topIcon) +
+        itemHtml("bottom", "Alinhar abaixo", "Um abaixo do outro, centralizados, abaixo " + doNo + ".", bottomIcon) +
       '</div>' +
       '<div class="modal-actions"><button data-a="cancel">Cancelar</button></div>' +
     '</div>';
@@ -3669,6 +3800,16 @@ document.addEventListener("keydown", function(e){
   // digitados para apagar um caractere dentro do texto acabavam excluindo a anotação inteira
   // (já que ela fica selecionada enquanto seu painel de edição está aberto).
   var inField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (ae && ae.isContentEditable);
+  // Atalho de alinhamento de atributos: Ctrl+A começa a sequência (ver applyAttributeAlignCycleShortcut
+  // e getAlignShortcutTarget, perto de alignEntityAttributes); se a tecla seguinte -- ainda com
+  // Ctrl pressionado -- for E/D/C/B, ela é a segunda letra do atalho (ex.: Ctrl+A seguido de Ctrl+E
+  // = "alinhar à Esquerda"). Qualquer OUTRA tecla enquanto se aguarda essa segunda letra cancela a
+  // espera (sem impedir o tratamento normal dela logo abaixo, inclusive as outras ramificações
+  // deste mesmo "if/else").
+  var pendingAlignBefore = alignShortcutPending;
+  var isAlignShortcutFollowup = pendingAlignBefore && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey &&
+    ALIGN_SHORTCUT_KEYS.hasOwnProperty((e.key || "").toLowerCase());
+  if (pendingAlignBefore && !isAlignShortcutFollowup) clearAlignShortcutPending();
   if (e.key === "Escape"){
     if (connectMode){ connectMode = false; connectFrom = null; connectSticky = false; }
     else if (pendingAdd){ pendingAdd = null; }
@@ -3677,6 +3818,32 @@ document.addEventListener("keydown", function(e){
   } else if ((e.key === "Delete" || e.key === "Backspace") && !inField && (selectedNodeIds.size || selectedEdgeIds.size)){
     e.preventDefault();
     deleteSelection();
+  } else if (isAlignShortcutFollowup){
+    // Segunda letra do atalho de alinhamento (Ctrl+A já tinha sido apertado antes) -- aplica direto
+    // o alinhamento pedido, sem esperar o prazo do Ctrl+A sozinho terminar.
+    e.preventDefault();
+    var alignFollowupNode = pendingAlignBefore.node;
+    var alignFollowupMode = ALIGN_SHORTCUT_KEYS[e.key.toLowerCase()];
+    clearAlignShortcutPending();
+    applyAttributeAlignShortcut(alignFollowupNode, alignFollowupMode);
+  } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "a" || e.key === "A") && !inField){
+    // Pedido do usuário: "Com uma entidade selecionada, gostaria que as teclas de atalho tivessem a
+    // seguinte correspondência: ctrl + ae (Alinha atributos a esquerda); ctrl + ad (Alinha atributos
+    // a direita); ctrl + ac (Alinha atributos acima); ctrl + ab (Alinha atributos abaixo); ctrl + a
+    // (Aplica os tipos de alinhamento na sequência a cada aplicação do atalho)." -- sem uma entidade
+    // ou relacionamento único selecionado, o Ctrl+A segue livre (ex.: continua selecionando texto
+    // dentro de um campo, coberto por "!inField" acima).
+    var alignShortcutTarget = getAlignShortcutTarget();
+    if (alignShortcutTarget){
+      e.preventDefault();
+      alignShortcutPending = {
+        node: alignShortcutTarget,
+        timer: setTimeout(function(){
+          alignShortcutPending = null;
+          applyAttributeAlignCycleShortcut(alignShortcutTarget);
+        }, 700)
+      };
+    }
   } else if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "c" || e.key === "C") && !inField){
     // Fora de um campo de texto, Ctrl+C (ou Cmd+C no Mac) copia os elementos selecionados do
     // diagrama; dentro de um campo, o atalho continua copiando texto normalmente (não interceptado).
@@ -4365,7 +4532,9 @@ function updatePanel(){
 
     if (n.type === "entity"){
       html += '<label class="checkline"><input type="checkbox" id="pf-weak" ' + (n.weak ? "checked" : "") + '> Entidade fraca</label>';
-      html += '<p class="hint">Dica: clique com o botão direito sobre a entidade para alinhar automaticamente os atributos ligados a ela (à esquerda, à direita, acima ou abaixo dela).</p>';
+      html += attributeAlignHintHtml(n.type);
+    } else if (n.type === "relationship"){
+      html += attributeAlignHintHtml(n.type);
     } else if (n.type === "attribute"){
       html += '<label class="checkline"><input type="checkbox" id="pf-key" ' + (n.isKey ? "checked" : "") + '> É atributo-chave (sublinhado)</label>';
     } else if (n.type === "generalization"){
@@ -5709,10 +5878,9 @@ projectNameInput.addEventListener("input", function(e){
   noteUndoCheckpoint();
 });
 
-/* ---------- alternar entre Modelagem Conceitual e Modelagem Lógica ---------- */
-var modeSelect = document.getElementById("modeSelect");
+/* ---------- alternar entre Modelo Conceitual e Modelo Lógico ---------- */
 function applyModeUI(){
-  modeSelect.value = physicalActive ? "physical" : mode;
+  updateModeMenuLabel();
   var isLogical = mode === "logical";
   document.getElementById("toolbarConceptual").hidden = isLogical;
   document.getElementById("toolbarLogical").hidden = !isLogical;
@@ -5725,60 +5893,32 @@ function applyModeUI(){
   document.getElementById("zoomCtl").hidden = physicalActive;
   document.getElementById("sqlView").hidden = !physicalActive;
 }
-// Ao entrar em Modelagem Lógica: se ainda não existe um modelo lógico, gera um automaticamente
-// (nada a perder). Se já existe um, pergunta a cada vez o que fazer com ele — Sim: reconverte do
-// zero a partir do diagrama conceitual atual, descartando o modelo lógico existente (e qualquer
-// edição manual nele); Não: abre o modelo lógico como ele já estava, sem mexer; Limpar: esvazia
-// o modelo lógico (fica sem nenhuma tabela), para montar tudo manualmente do zero. "Não" é a
-// opção padrão (com o foco inicial no modal).
-async function switchMode(target){
-  if (target === mode) return;
+// Pedido do usuário: trocar de modelo no seletor do topo não deve mostrar nenhuma janela de
+// confirmação. Regra única, sem perguntar nada: se o modelo de destino ainda não existe, gera
+// automaticamente a partir do outro (como já acontecia antes nesse caso); se já existe, só abre
+// ele como está, sem regenerar -- assim nunca se perde uma edição manual só por trocar de tela
+// (equivalente ao que antes era a opção "Não" do diálogo removido).
+// `force` (usado por generateMode, abaixo): pula a saída antecipada "já estou no modo pedido,
+// não faz nada", e sempre religa `state` ao objeto atual de logicalModel/conceptualModel. Sem
+// isso, quando generateMode substitui logicalModel/conceptualModel por um objeto novo mas o modo
+// já era esse mesmo alvo (ex.: "Gerar Modelo Lógico" clicado no Físico alcançado pela própria
+// tela Lógica -- `mode` já é "logical"), `state` continuaria apontando para o objeto ANTIGO
+// (pré-regeneração), e o quadro mostraria o modelo desatualizado mesmo com logicalModel/
+// conceptualModel já corretos por baixo.
+function switchMode(target, force){
+  if (target === mode && !force) return;
   if (target === "logical"){
     if (!logicalModel){
       logicalModel = convertConceptualToLogical(conceptualModel);
       showToast('Modelo lógico gerado automaticamente a partir do diagrama conceitual — os dois ficam guardados separadamente a partir de agora, então alternar entre eles não apaga suas edições.');
-    } else {
-      var choice = await askChoice3(
-        "Gerar modelo lógico",
-        'Gerar o modelo lógico a partir do diagrama conceitual atual? "Sim" descarta o modelo lógico existente (inclusive edições manuais) e gera um novo. "Não" abre o modelo lógico como ele está. "Limpar" esvazia o modelo lógico para você montá-lo manualmente do zero.',
-        [
-          { key:"no", label:"Não", className:"primary", isCancel:true, isDefault:true },
-          { key:"clear", label:"Limpar" },
-          { key:"yes", label:"Sim", className:"dangerous" }
-        ]
-      );
-      if (choice === "yes"){
-        logicalModel = convertConceptualToLogical(conceptualModel);
-        showToast("Modelo lógico reconvertido a partir do diagrama conceitual.");
-      } else if (choice === "clear"){
-        logicalModel = freshLogicalState(logicalModel.projectName);
-        showToast("Modelo lógico limpo — monte as tabelas manualmente ou reconverta depois.");
-      }
-      // "no" (ou fechar clicando fora): mantém o modelo lógico exatamente como estava.
     }
+    // se já existe um modelo lógico, abre ele exatamente como está -- sem perguntar, sem regenerar.
   } else if (target === "conceptual"){
     if (!conceptualModel.nodes.length){
       conceptualModel = convertLogicalToConceptual(logicalModel);
       showToast('Modelo conceitual gerado automaticamente a partir das tabelas do modelo lógico (engenharia reversa) — os dois ficam guardados separadamente a partir de agora, então alternar entre eles não apaga suas edições.');
-    } else {
-      var choice2 = await askChoice3(
-        "Gerar modelo conceitual",
-        'Gerar o modelo conceitual a partir das tabelas do modelo lógico atual (engenharia reversa)? "Sim" descarta o diagrama conceitual existente (inclusive edições manuais) e gera um novo a partir das tabelas — como a conversão é sempre ambígua em alguns casos (entidade fraca x generalização, por exemplo), confira o resultado. "Não" abre o diagrama conceitual como ele está. "Limpar" esvazia o diagrama conceitual para você montá-lo manualmente do zero.',
-        [
-          { key:"no", label:"Não", className:"primary", isCancel:true, isDefault:true },
-          { key:"clear", label:"Limpar" },
-          { key:"yes", label:"Sim", className:"dangerous" }
-        ]
-      );
-      if (choice2 === "yes"){
-        conceptualModel = convertLogicalToConceptual(logicalModel);
-        showToast("Modelo conceitual gerado a partir das tabelas do modelo lógico (engenharia reversa).");
-      } else if (choice2 === "clear"){
-        conceptualModel = freshState(conceptualModel.projectName);
-        showToast("Modelo conceitual limpo — monte o diagrama manualmente ou gere a partir das tabelas depois.");
-      }
-      // "no" (ou fechar clicando fora): mantém o diagrama conceitual exatamente como estava.
     }
+    // se já existe um diagrama conceitual, abre ele exatamente como está -- sem perguntar, sem regenerar.
   }
   mode = target;
   state = (mode === "logical") ? logicalModel : conceptualModel;
@@ -5788,50 +5928,173 @@ async function switchMode(target){
   render();
   fitToContent();
 }
-// Pedido do usuário: "Modelo Físico" no mesmo seletor do topo -- ao ser escolhido, mostra a janela
-// "Gerar modelo físico" (Não/Limpar/Sim), MAS só quando já existe um modelo lógico (sem ele, não
-// há nada para gerar, então não pergunta nada e não gera nada). Diferente das janelas de
-// switchMode, aqui nenhuma das três opções toca no modelo conceitual nem no lógico -- elas mexem
-// só no texto do SQL (`physicalSql`), que é o que fica na caixa editável do Modelo Físico:
-// "Sim" gera o SQL a partir do modelo lógico atual (sobrescrevendo o que estiver na caixa),
-// "Não" mantém o SQL como estava (o último gerado, ou o que o usuário tiver editado à mão) e
-// "Limpar" apenas esvazia a caixa. Também não mexe em `mode`/`state`/seleção -- entrar no Físico
-// é puramente uma troca de VISÃO (ver applyModeUI), nunca uma troca de modo.
-async function enterPhysicalView(){
-  if (logicalModel){
-    var choice = await askChoice3(
-      "Gerar modelo físico",
-      'Gerar o código SQL a partir do modelo lógico atual? "Sim" gera o SQL agora, substituindo o que estiver na caixa. "Não" mantém o SQL mostrado da última vez (ou o que você tiver editado). "Limpar" apaga o conteúdo da caixa de SQL. Nenhuma dessas opções altera o modelo conceitual nem o modelo lógico — só o texto do SQL exibido.',
-      [
-        { key:"no", label:"Não", className:"primary", isCancel:true, isDefault:true },
-        { key:"clear", label:"Limpar" },
-        { key:"yes", label:"Sim", className:"dangerous" }
-      ]
-    );
-    if (choice === "yes"){
-      physicalSql = generateSqlFromLogicalModel(logicalModel);
-      scheduleAutosave();
-    } else if (choice === "clear"){
-      physicalSql = "";
-      scheduleAutosave();
-    }
-    // "não" (ou fechar clicando fora): mantém `physicalSql` exatamente como estava.
+// Pedido do usuário: escolher "Modelo Físico" no seletor do topo não deve mostrar nenhuma janela
+// de confirmação (mesma regra de switchMode, acima). Se já existe algum texto de SQL (gerado
+// antes, ou editado à mão), abre a visão física com ele como está, sem regenerar -- evita
+// sobrescrever uma edição manual só por reabrir a tela. Só gera o SQL automaticamente quando a
+// caixa ainda está vazia e já existe um modelo lógico para gerar a partir dele. Não mexe no
+// modelo conceitual nem no lógico em nenhum caso -- entrar no Físico é puramente uma troca de
+// VISÃO (ver applyModeUI), nunca uma troca de modo.
+function enterPhysicalView(){
+  if (logicalModel && !physicalSql){
+    physicalSql = generateSqlFromLogicalModel(logicalModel);
+    scheduleAutosave();
   }
-  // Sem nenhum modelo lógico ainda: não pergunta nada e não gera nada -- só mostra a visão física
-  // com o que já estiver na caixa (provavelmente vazia).
+  // Já existe algum SQL na caixa, ou não há modelo lógico ainda: mostra a visão física com o que
+  // já estiver lá (gerado antes, editado à mão, ou vazia mesmo), sem mexer em nada.
   physicalActive = true;
   applyModeUI();
   renderPhysicalSql();
 }
-function exitPhysicalView(target){
+function exitPhysicalView(target, force){
   physicalActive = false;
-  if (target !== mode) switchMode(target);
+  if (target !== mode || force) switchMode(target, force);
   else { applyModeUI(); render(); fitToContent(); }
 }
-modeSelect.addEventListener("change", function(){
-  var v = modeSelect.value;
-  if (v === "physical") enterPhysicalView();
-  else exitPhysicalView(v === "logical" ? "logical" : "conceptual");
+// Vai para o modelo `target` ("conceptual"/"logical"/"physical") sem alterar nenhum modelo --
+// usada pelos três itens fixos do menu (ver renderModeMenuPanel), que só trocam de tela. Os
+// itens "Gerar Modelo X" (extra) usam generateMode, abaixo, que força a (re)geração do modelo de
+// destino antes de chamar esta mesma função (com `force`, para religar `state` mesmo quando o
+// modo pedido já era o atual -- ver o comentário em switchMode). Trocar de modelo por aqui nunca
+// mostra diálogo de confirmação (ver switchMode/enterPhysicalView, acima).
+function goToMode(target, force){
+  if (target === "physical") enterPhysicalView();
+  else exitPhysicalView(target === "logical" ? "logical" : "conceptual", force);
+}
+// Pedido do usuário: ao selecionar um item "Gerar Modelo X" (diferente dos itens base, que só
+// trocam de tela sem alterar nenhum modelo -- ver goToMode/switchMode/enterPhysicalView acima),
+// o modelo de destino deve ser efetivamente (re)gerado, sobrescrevendo o que já existir lá
+// (inclusive edições manuais), sem perguntar nada (mesma regra de nunca mostrar diálogo de
+// confirmação).
+//
+// Cada `target` tem uma única origem fixa, sempre a mesma não importa a tela atual (`mode`/
+// `physicalActive`): "logical" vem sempre do conceitual atual, "conceptual" vem sempre do lógico
+// atual (engenharia reversa), "physical" (SQL) vem sempre do lógico atual. Isso vale mesmo
+// quando o item "Gerar Modelo Lógico" é clicado a partir da tela Física alcançada pela própria
+// tela Lógica (`mode === "logical"`) -- caso mais comum na prática (montar as tabelas direto na
+// Lógica e só depois abrir o Físico para ver o SQL) -- porque "gerar o modelo lógico" só pode
+// significar reconvertê-lo a partir do conceitual, do mesmo jeito que aconteceria clicando o
+// mesmo item na tela Conceitual; não existe (nem faria sentido existir) uma "engenharia reversa"
+// do SQL de volta para o lógico. Antes, essa reconversão só acontecia quando `mode` já era
+// "conceptual"; quando `mode` já era "logical" o item virava sem efeito nenhum (pedido do
+// usuário, reincidente: "do Modelo Físico eu não estou conseguindo gerar o modelo lógico" --
+// esse é justamente o caminho mais comum, Lógica -> Física, então praticamente nunca gerava
+// nada). Note que isso é consistente com o próprio padrão já estabelecido para os outros dois
+// itens ("Gerar Modelo Conceitual"/"Gerar Modelo Físico"), que já sempre sobrescrevem a partir da
+// origem fixa deles, mesmo descartando conteúdo criado só no destino.
+//
+// Chama goToMode(target, true) -- o "true" (force) importa especificamente para target==="logical"
+// alcançado a partir do Físico quando `mode` já era "logical": sem ele, exitPhysicalView achava
+// que "nada mudou" (target === mode) e não religava `state` ao logicalModel recém-substituído
+// acima, deixando o quadro mostrando o modelo antigo mesmo com logicalModel já correto por baixo.
+function generateMode(target){
+  if (target === "logical"){
+    logicalModel = convertConceptualToLogical(conceptualModel);
+    showToast("Modelo lógico gerado a partir do diagrama conceitual atual.");
+  } else if (target === "conceptual"){
+    conceptualModel = convertLogicalToConceptual(logicalModel);
+    showToast("Modelo conceitual gerado a partir das tabelas do modelo lógico (engenharia reversa).");
+  } else if (target === "physical"){
+    physicalSql = generateSqlFromLogicalModel(logicalModel);
+    scheduleAutosave();
+  }
+  goToMode(target, true);
+}
+/* ---------- menu do seletor de modelo (Modelo Conceitual / Lógico / Físico) ---------- */
+// Pedido do usuário: trocar os nomes "Modelagem Conceitual"/"Modelagem Lógica" para "Modelo
+// Conceitual"/"Modelo Lógico", e acrescentar, depois de uma divisória, item(ns) "Gerar Modelo X"
+// que variam conforme a tela atual -- a lógica de "o que aparece depois da divisória" abaixo, em
+// MODE_EXTRA_ITEMS_BY_CURRENT, reflete exatamente o pedido: na tela conceitual só o lógico é
+// alcançável a partir dela ("Gerar Modelo Lógico"); na lógica, tanto o conceitual quanto o físico
+// são alcançáveis a partir dela (ela é o modelo "do meio"); na física, só o lógico (de onde o SQL
+// foi gerado) -- mesmo item também aparece nesse último caso, já que sair do Físico volta pro
+// modelo por trás dele, que pode ser tanto o conceitual quanto o lógico (ver goToMode/
+// exitPhysicalView), mas o pedido do usuário foi especificamente "Gerar Modelo Lógico" aqui.
+var MODE_BASE_ITEMS = [
+  { key:"conceptual", label:"Modelo Conceitual" },
+  { key:"logical", label:"Modelo Lógico" },
+  { key:"physical", label:"Modelo Físico" }
+];
+var MODE_EXTRA_ITEMS_BY_CURRENT = {
+  conceptual: [ { key:"logical", label:"Gerar Modelo Lógico" } ],
+  logical: [ { key:"conceptual", label:"Gerar Modelo Conceitual" }, { key:"physical", label:"Gerar Modelo Físico" } ],
+  physical: [ { key:"logical", label:"Gerar Modelo Lógico" } ]
+};
+var modeMenuWrap = document.getElementById("modeMenuWrap");
+var modeMenu = document.getElementById("modeMenu");
+var btnModeMenuEl = document.getElementById("btnModeMenu");
+var modeMenuPanel = document.getElementById("modeMenuPanel");
+var modeMenuLabelEl = document.getElementById("modeMenuLabel");
+function modeMenuLabelFor(key){
+  return key === "physical" ? "Modelo Físico" : (key === "logical" ? "Modelo Lógico" : "Modelo Conceitual");
+}
+function updateModeMenuLabel(){
+  modeMenuLabelEl.textContent = modeMenuLabelFor(physicalActive ? "physical" : mode);
+}
+// "kind" ("base"/"extra") vira uma classe extra (mode-menu-item-base/mode-menu-item-extra) só
+// para diferenciar visualmente/estruturalmente os dois grupos quando precisar (ex.: em testes,
+// já que um mesmo "target" pode aparecer nos dois grupos ao mesmo tempo -- ver
+// MODE_EXTRA_ITEMS_BY_CURRENT.logical, onde "conceptual" e "physical" repetem targets que também
+// estão no grupo base).
+function modeMenuItemHtml(item, isActive, kind){
+  return '<button type="button" class="dl-menu-item mode-menu-item mode-menu-item-' + kind + (isActive ? " active" : "") +
+    '" data-target="' + item.key + '">' + escapeHtml(item.label) + '</button>';
+}
+// Remonta o conteúdo do menu a cada abertura (em vez de manter sincronizado o tempo todo), já
+// que tanto o item destacado quanto os itens depois da divisória dependem da tela atual no
+// momento em que o menu é aberto.
+function renderModeMenuPanel(){
+  var current = physicalActive ? "physical" : mode;
+  var baseHtml = MODE_BASE_ITEMS.map(function(item){ return modeMenuItemHtml(item, item.key === current, "base"); }).join("");
+  var extraHtml = (MODE_EXTRA_ITEMS_BY_CURRENT[current] || []).map(function(item){ return modeMenuItemHtml(item, false, "extra"); }).join("");
+  modeMenuPanel.innerHTML = baseHtml + '<hr class="dl-menu-divider">' + extraHtml;
+}
+function closeModeMenu(){
+  modeMenu.hidden = true;
+  btnModeMenuEl.setAttribute("aria-expanded", "false");
+}
+function openModeMenu(){
+  renderModeMenuPanel();
+  modeMenu.hidden = false;
+  btnModeMenuEl.setAttribute("aria-expanded", "true");
+  positionModeMenuMobile();
+}
+// Mesmo motivo/mecanismo de positionProjMenuMobile (ver logo abaixo, no menu "Projeto"): no
+// celular o menu vira "position:fixed" (ver a regra ".dl-menu" dentro do @media max-width:880px),
+// então suas coordenadas precisam ser calculadas na mão a cada abertura.
+function positionModeMenuMobile(){
+  if (mobileLayoutMQ.matches){
+    var r = modeMenuWrap.getBoundingClientRect();
+    var menuWidth = modeMenu.offsetWidth || 220;
+    var left = Math.min(r.left, window.innerWidth - menuWidth - 8);
+    left = Math.max(8, left);
+    modeMenu.style.top = (r.bottom + 6) + "px";
+    modeMenu.style.left = left + "px";
+  } else {
+    modeMenu.style.top = "";
+    modeMenu.style.left = "";
+  }
+}
+btnModeMenuEl.addEventListener("click", function(e){
+  e.stopPropagation();
+  if (modeMenu.hidden) openModeMenu(); else closeModeMenu();
+});
+modeMenuPanel.addEventListener("click", function(e){
+  var btn = e.target.closest(".mode-menu-item[data-target]");
+  if (!btn) return;
+  e.stopPropagation();
+  closeModeMenu();
+  var target = btn.getAttribute("data-target");
+  // Itens base só trocam de tela; itens "Gerar Modelo X" (extra) forçam a (re)geração do modelo
+  // de destino -- ver generateMode.
+  if (btn.classList.contains("mode-menu-item-extra")) generateMode(target);
+  else goToMode(target);
+});
+document.addEventListener("click", function(e){
+  if (!modeMenu.hidden && !modeMenuWrap.contains(e.target)) closeModeMenu();
+});
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape" && !modeMenu.hidden) closeModeMenu();
 });
 document.getElementById("btnCopySql").addEventListener("click", function(){
   var text = document.getElementById("sqlOutput").value || "";
