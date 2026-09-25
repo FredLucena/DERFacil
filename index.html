@@ -4563,7 +4563,19 @@ function normalizeLoadedState(parsed){
       isKey: !!n.isKey, coverage: n.coverage || "partial", overlap: n.overlap || "disjoint",
       noteW: isFinite(Number(n.noteW)) && n.noteW ? Number(n.noteW) : null,
       noteH: isFinite(Number(n.noteH)) && n.noteH ? Number(n.noteH) : null,
-      align: ["left","center","right","justify"].indexOf(n.align) !== -1 ? n.align : "left"
+      align: ["left","center","right","justify"].indexOf(n.align) !== -1 ? n.align : "left",
+      // Bug relatado pelo usuário: "ao abrir um arquivo json salvo, os atributos não estão
+      // alinhados como no salvamento" -- estes três campos não eram reconstruídos ao carregar,
+      // então se perdiam silenciosamente mesmo já tendo sido gravados no autosave/arquivo:
+      // `lineAxis` (em um atributo) decide se a linha até a entidade sai na vertical ou na
+      // horizontal (ver renderEdge/attrVerticalLeftPoint) -- sem ele a linha volta a um cálculo
+      // genérico de ponto de borda, que não bate mais com o arranjo em pilha; `attrAlignMode` e
+      // `attrOrderIds` (em uma entidade/relacionamento) lembram o arranjo escolhido (acima/
+      // abaixo/esquerda/direita) e a ordem dos atributos, usados por alignEntityAttributes para
+      // reorganizar o grupo inteiro ao incluir um novo atributo ou reabrir o menu "Organizar".
+      lineAxis: (n.lineAxis === "h" || n.lineAxis === "v") ? n.lineAxis : undefined,
+      attrAlignMode: ["top","bottom","left","right"].indexOf(n.attrAlignMode) !== -1 ? n.attrAlignMode : undefined,
+      attrOrderIds: Array.isArray(n.attrOrderIds) ? n.attrOrderIds.slice() : undefined
     }, {});
     if (base.type === "note"){
       base.runs = normalizeNoteRuns(n);
