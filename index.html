@@ -3434,7 +3434,10 @@ function applyAttributeAlignShortcut(node, mode){
     return;
   }
   render();
-  showToast("Atributos organizados.");
+  // Pedido do usuário: "Ao mandar alinhar os atributos, não quero que a mensagem 'Atributos
+  // organizados' seja mostrada." -- o reposicionamento em si já é visível no quadro, sem precisar
+  // de um toast confirmando (mas o aviso de "não tem atributos para organizar" acima continua,
+  // já que ali não há nenhuma mudança visual que avise o usuário sozinha).
 }
 // Ctrl+A sozinho (sem a segunda letra chegar a tempo): aplica o próximo arranjo da sequência
 // esquerda -> direita -> acima -> abaixo -> esquerda..., a cada nova aplicação do atalho -- não
@@ -3493,7 +3496,8 @@ function showAttributeAlignMenu(entity){
       cleanup();
       alignEntityAttributes(entity, key);
       render();
-      showToast("Atributos organizados.");
+      // Pedido do usuário: sem o toast "Atributos organizados." -- o reposicionamento já aparece
+      // sozinho no quadro (ver applyAttributeAlignShortcut, mesmo pedido aplicado ao atalho).
     });
   });
 }
