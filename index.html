@@ -178,9 +178,18 @@
      correspondente à tela atual fica destacado (mesmo tratamento visual do botão ativo na barra
      de ferramentas, .tbtn.active), para o usuário saber onde está sem precisar ler o rótulo do
      botão que abre o menu. */
-  .mode-menu{ width:220px; }
-  .mode-menu-item{ align-items:center; font-size:13px; }
+  .mode-menu{ width:250px; }
+  .mode-menu-item{ align-items:center; font-size:13px; justify-content:space-between; gap:10px; }
   .mode-menu-item.active{ background:var(--accent-fill); color:var(--accent-ink); font-weight:600; }
+  .mode-menu-item-label{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Pedido do usuário: "dentro de cada item da seleção de modelos, fosse mostrado os respectivos
+     atalhos" -- só os três itens base (Conceitual/Lógico/Físico) têm um atalho de teclado
+     associado (ver MODE_BASE_ITEMS/modeMenuItemHtml); os itens "Gerar Modelo X" continuam sem
+     nada aqui, já que não têm atalho próprio. */
+  .mode-menu-item-shortcut{
+    font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); flex-shrink:0;
+  }
+  .mode-menu-item.active .mode-menu-item-shortcut{ color:var(--accent-ink); }
 
   main{ flex:1; display:flex; min-height:0; }
 
@@ -3797,6 +3806,35 @@ gridSizeInput.addEventListener("keydown", function(e){ if (e.key === "Enter") gr
 document.getElementById("gridSizeDown").addEventListener("click", function(){ setGridSize(GRID_SIZE - 2); });
 document.getElementById("gridSizeUp").addEventListener("click", function(){ setGridSize(GRID_SIZE + 2); });
 
+// Atalhos de teclado para trocar de tela (pedido do usuário: "Crie os atalhos ctrl + mc (para ir
+// para o modelo Conceitual), ctrl + ml (para ir para o modelo Lógico) e ctrl + mf (para ir para o
+// modelo Físico)."). Mesmo padrão de "prefixo + segunda tecla" já usado no atalho de alinhamento
+// de atributos (ver ALIGN_SHORTCUT_KEYS/alignShortcutPending, acima): Ctrl+M começa a espera pela
+// segunda tecla (C/L/F), ainda com Ctrl pressionado; qualquer OUTRA tecla enquanto se aguarda essa
+// segunda tecla cancela a espera (tratada normalmente, como no atalho de alinhamento). Diferente
+// dele, aqui não existe um "Ctrl+M sozinho" -- trocar de tela não faz sentido "em sequência" a
+// cada aperto (como o alinhamento faz), então sem a segunda tecla a tempo o prazo só expira sem
+// efeito nenhum. Usa goToMode (perto de switchMode/enterPhysicalView, mais abaixo) -- as mesmas
+// três telas já alcançáveis pelo seletor "Modelo Conceitual/Lógico/Físico" no cabeçalho, sem
+// gerar/regenerar nenhum modelo (equivalente a clicar um dos três itens BASE desse menu, nunca os
+// itens "Gerar Modelo X").
+var MODE_SHORTCUT_KEYS = { c: "conceptual", l: "logical", f: "physical" };
+var modeShortcutPending = null; // { timer } -- enquanto se aguarda a segunda letra (C/L/F) após Ctrl+M
+function clearModeShortcutPending(){
+  if (modeShortcutPending && modeShortcutPending.timer) clearTimeout(modeShortcutPending.timer);
+  modeShortcutPending = null;
+}
+// Dica sobre o atalho acima, mostrada na barra à direita (painel de propriedades) enquanto nada
+// está selecionado -- pedido do usuário: "Coloque as informações sobre os atalhos na barra a
+// direita da tela." Mesmo padrão de attributeAlignHintHtml (perto de alignEntityAttributes), mas
+// como esse atalho não depende de nenhuma seleção (troca a tela inteira), a dica fica junto das
+// outras dicas gerais dos painéis "nada selecionado" (conceitual e lógico), em vez de um painel de
+// elemento específico -- na visão Física a barra à direita já não aparece (ver applyModeUI), então
+// não há onde mostrá-la ali.
+function modeShortcutHintHtml(){
+  return '<p class="hint">Dica: use Ctrl+M seguido de C, L ou F para ir direto para o Modelo Conceitual, o Lógico ou o Físico, sem precisar abrir o menu no canto superior esquerdo.</p>';
+}
+
 document.addEventListener("keydown", function(e){
   var ae = document.activeElement;
   var tag = (ae && ae.tagName) || "";
@@ -3814,6 +3852,12 @@ document.addEventListener("keydown", function(e){
   var isAlignShortcutFollowup = pendingAlignBefore && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey &&
     ALIGN_SHORTCUT_KEYS.hasOwnProperty((e.key || "").toLowerCase());
   if (pendingAlignBefore && !isAlignShortcutFollowup) clearAlignShortcutPending();
+  // Atalho de troca de tela (Ctrl+M + C/L/F): mesma lógica de "segunda tecla" acima, mas com seu
+  // próprio estado (modeShortcutPending), independente do atalho de alinhamento.
+  var pendingModeBefore = modeShortcutPending;
+  var isModeShortcutFollowup = pendingModeBefore && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey &&
+    MODE_SHORTCUT_KEYS.hasOwnProperty((e.key || "").toLowerCase());
+  if (pendingModeBefore && !isModeShortcutFollowup) clearModeShortcutPending();
   if (e.key === "Escape"){
     if (connectMode){ connectMode = false; connectFrom = null; connectSticky = false; }
     else if (pendingAdd){ pendingAdd = null; }
@@ -3848,6 +3892,23 @@ document.addEventListener("keydown", function(e){
         }, 700)
       };
     }
+  } else if (isModeShortcutFollowup){
+    // Segunda letra do atalho de troca de tela (Ctrl+M já tinha sido apertado antes) -- vai direto
+    // para o modelo pedido (goToMode, perto de switchMode/enterPhysicalView), sem esperar o prazo
+    // do atalho terminar.
+    e.preventDefault();
+    var modeFollowupTarget = MODE_SHORTCUT_KEYS[e.key.toLowerCase()];
+    clearModeShortcutPending();
+    goToMode(modeFollowupTarget);
+  } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "m" || e.key === "M") && !inField){
+    // Pedido do usuário: "Crie os atalhos ctrl + mc (para ir para o modelo Conceitual), ctrl + ml
+    // (para ir para o modelo Lógico) e ctrl + mf (para ir para o modelo Físico)." -- dentro de um
+    // campo de texto, Ctrl+M segue livre (não é um atalho de edição de texto conhecido, mas o
+    // padrão "!inField" é mantido por consistência com os outros atalhos desta lista).
+    e.preventDefault();
+    modeShortcutPending = {
+      timer: setTimeout(function(){ modeShortcutPending = null; }, 700)
+    };
   } else if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "c" || e.key === "C") && !inField){
     // Fora de um campo de texto, Ctrl+C (ou Cmd+C no Mac) copia os elementos selecionados do
     // diagrama; dentro de um campo, o atalho continua copiando texto normalmente (não interceptado).
@@ -4452,6 +4513,7 @@ function updatePanel(){
         '<p>Use "Tabela" na barra à esquerda para criar uma tabela nova, e "Conectar" para ligar duas tabelas — isso já cria automaticamente uma coluna de chave estrangeira (FK) na primeira tabela clicada.</p>' +
         '<p>Dica: marque uma coluna como "PK" para torná-la chave primária — só assim outra tabela pode referenciá-la.</p>' +
         '<p>Dica: segure Ctrl (ou Cmd no Mac) ao clicar num botão da barra à esquerda, como "Tabela" ou "Conectar", para "fixar" a ferramenta e incluir vários elementos seguidos, sem precisar clicar no botão de novo a cada um.</p>' +
+        modeShortcutHintHtml() +
         '</div>';
       return;
     }
@@ -4462,6 +4524,7 @@ function updatePanel(){
       '<p>Dica: arraste um laço ao redor de vários elementos (ou Shift+clique) para selecioná-los — depois é só arrastar um deles para mover todos juntos, ou excluir todos de uma vez.</p>' +
       '<p>Dica: com "Alinhar à grade" ativado (botão na barra à esquerda), os elementos encaixam nos pontos da grade ao arrastar. Segure Alt para mover livremente sem encaixar.</p>' +
       '<p>Dica: segure Ctrl (ou Cmd no Mac) ao clicar num botão da barra à esquerda, como "Entidade", "Atributo" ou "Conectar", para "fixar" a ferramenta e incluir vários elementos seguidos, sem precisar clicar no botão de novo a cada um.</p>' +
+      modeShortcutHintHtml() +
       '</div>';
     return;
   }
@@ -6014,10 +6077,14 @@ function generateMode(target){
 // foi gerado) -- mesmo item também aparece nesse último caso, já que sair do Físico volta pro
 // modelo por trás dele, que pode ser tanto o conceitual quanto o lógico (ver goToMode/
 // exitPhysicalView), mas o pedido do usuário foi especificamente "Gerar Modelo Lógico" aqui.
+// Pedido do usuário (rodada posterior): "dentro de cada item da seleção de modelos, fosse mostrado
+// os respectivos atalhos" -- cada item base ganha o texto do atalho de teclado que leva direto a
+// ele (ver MODE_SHORTCUT_KEYS/goToMode, perto do atalho de teclado Ctrl+M). Os itens "Gerar Modelo
+// X" (MODE_EXTRA_ITEMS_BY_CURRENT, abaixo) não têm atalho próprio, então ficam sem essa coluna.
 var MODE_BASE_ITEMS = [
-  { key:"conceptual", label:"Modelo Conceitual" },
-  { key:"logical", label:"Modelo Lógico" },
-  { key:"physical", label:"Modelo Físico" }
+  { key:"conceptual", label:"Modelo Conceitual", shortcut:"Ctrl+M, C" },
+  { key:"logical", label:"Modelo Lógico", shortcut:"Ctrl+M, L" },
+  { key:"physical", label:"Modelo Físico", shortcut:"Ctrl+M, F" }
 ];
 var MODE_EXTRA_ITEMS_BY_CURRENT = {
   conceptual: [ { key:"logical", label:"Gerar Modelo Lógico" } ],
@@ -6041,8 +6108,9 @@ function updateModeMenuLabel(){
 // MODE_EXTRA_ITEMS_BY_CURRENT.logical, onde "conceptual" e "physical" repetem targets que também
 // estão no grupo base).
 function modeMenuItemHtml(item, isActive, kind){
+  var shortcutHtml = item.shortcut ? '<span class="mode-menu-item-shortcut">' + escapeHtml(item.shortcut) + '</span>' : '';
   return '<button type="button" class="dl-menu-item mode-menu-item mode-menu-item-' + kind + (isActive ? " active" : "") +
-    '" data-target="' + item.key + '">' + escapeHtml(item.label) + '</button>';
+    '" data-target="' + item.key + '"><span class="mode-menu-item-label">' + escapeHtml(item.label) + '</span>' + shortcutHtml + '</button>';
 }
 // Remonta o conteúdo do menu a cada abertura (em vez de manter sincronizado o tempo todo), já
 // que tanto o item destacado quanto os itens depois da divisória dependem da tela atual no
