@@ -2104,6 +2104,175 @@ function generateSqlFromLogicalModel(logical){
   });
   return blocks.join("\n\n");
 }
+
+/* ---------- Modelo Físico -> Modelo Lógico: extração de tipo/restrições do SQL ---------- */
+// Pedido do usuário: "quando da geração do modelo lógico a partir do modelo físico, os tipos de
+// dados e restrições devem ser extraídos do modelo físico (SQL)" -- ou seja, ao clicar "Gerar
+// Modelo Lógico" a partir da tela Física, em vez de só reaproveitar o que já estava no modelo
+// lógico ANTERIOR (ver preserveLogicalColumnEditsAcrossRegeneration, abaixo), o texto do SQL --
+// que o usuário pode ter editado à mão -- passa a ser a fonte preferida para o tipo/tamanho/
+// decimais e as restrições de cada coluna. Isto NÃO é uma engenharia reversa completa (a
+// estrutura das tabelas -- quais tabelas existem, PK, FK -- continua vindo sempre do conceitual,
+// como documentado acima em generateMode/goToMode): é só a extração desses dois aspectos
+// específicos, exatamente os que o usuário pediu.
+// Este parser reconhece o formato que o próprio generateSqlFromLogicalModel produz (um
+// "CREATE TABLE nome (" sozinho na linha, uma coluna ou PRIMARY KEY/FOREIGN KEY por linha, ");"
+// sozinho na linha) -- o mesmo layout que a caixa de texto mostra para o usuário editar. Uma
+// linha que foge desse padrão (ex.: o usuário reescreveu tudo numa linha só) é simplesmente
+// ignorada, sem travar a extração das demais -- best-effort, nunca lança erro.
+
+// Divide `str` no caractere `sep` só nos pontos em que a profundidade de parênteses é zero --
+// evita quebrar no meio de "DECIMAL(10,2)", "CHECK (a, b)" etc.
+function splitTopLevel(str, sep){
+  var parts = [];
+  var depth = 0;
+  var current = "";
+  for (var i = 0; i < str.length; i++){
+    var ch = str[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === sep && depth === 0){ parts.push(current); current = ""; }
+    else current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+// A partir de `str[openIdx] === "("`, acha o ")" que fecha esse mesmo parêntese (respeitando
+// parênteses aninhados) -- usada para CHECK (...), IDENTITY (...) e o corpo do CREATE TABLE.
+function matchBalancedParens(str, openIdx){
+  var depth = 0;
+  for (var i = openIdx; i < str.length; i++){
+    if (str[i] === "(") depth++;
+    else if (str[i] === ")"){
+      depth--;
+      if (depth === 0) return { content: str.slice(openIdx + 1, i), endIdx: i + 1 };
+    }
+  }
+  return null;
+}
+// Reverte sqlIdent: tira as aspas duplas (e desfaz "" -> ") de um identificador citado; um
+// identificador simples volta como está.
+function unquoteSqlIdent(token){
+  var t = String(token || "").trim();
+  var m = /^"((?:[^"]|"")*)"$/.exec(t);
+  return m ? m[1].replace(/""/g, '"') : t;
+}
+// Separa o comentário (depois de "--") do código de uma linha, sem quebrar num "--" que esteja
+// dentro de uma string entre aspas simples (ex.: um DEFAULT '...--...' bem incomum).
+function splitLineComment(line){
+  var inQuote = false;
+  for (var i = 0; i < line.length - 1; i++){
+    var ch = line[i];
+    if (ch === "'"){
+      if (inQuote && line[i + 1] === "'"){ i++; continue; }
+      inQuote = !inQuote;
+      continue;
+    }
+    if (!inQuote && ch === "-" && line[i + 1] === "-") return { code: line.slice(0, i), comment: line.slice(i + 2).trim() };
+  }
+  return { code: line, comment: "" };
+}
+// Reconhece as restrições inline conhecidas (mesma lista que sqlConstraintClause sabe gerar) no
+// texto que sobra depois do tipo da coluna -- ex.: "NOT NULL", "UNIQUE", "CHECK (idade >= 0)",
+// "DEFAULT 0", "IDENTITY (1, 1)", ou várias juntas ("NOT NULL UNIQUE"). Texto que não bate com
+// nenhuma palavra-chave conhecida vira uma única restrição "crua", com esse texto como nome --
+// mantém a informação em vez de descartá-la silenciosamente.
+var SQL_CONSTRAINT_KEYWORD_RE = /\b(NOT\s+NULL|UNIQUE|CHECK|DEFAULT|IDENTITY)\b/i;
+function parseInlineConstraints(remainder){
+  var constraints = [];
+  var s = String(remainder || "").trim();
+  while (s.length){
+    var m = SQL_CONSTRAINT_KEYWORD_RE.exec(s);
+    if (!m){ constraints.push({ name: s.trim(), p1: "", p2: "" }); break; }
+    if (m.index > 0){
+      var raw = s.slice(0, m.index).trim();
+      if (raw) constraints.push({ name: raw, p1: "", p2: "" });
+      s = s.slice(m.index);
+      continue;
+    }
+    var kw = m[0].toUpperCase().replace(/\s+/g, " ");
+    var afterKw = s.slice(m[0].length);
+    if (kw === "NOT NULL" || kw === "UNIQUE"){
+      constraints.push({ name: kw, p1: "", p2: "" });
+      s = afterKw.trim();
+    } else if (kw === "CHECK" || kw === "IDENTITY"){
+      var rest = afterKw.replace(/^\s*/, "");
+      if (rest.charAt(0) === "("){
+        var bal = matchBalancedParens(rest, 0);
+        var inner = bal ? bal.content : "";
+        if (kw === "CHECK") constraints.push({ name: "CHECK", p1: inner.trim(), p2: "" });
+        else {
+          var idParts = splitTopLevel(inner, ",").map(function(x){ return x.trim(); }).filter(Boolean);
+          constraints.push({ name: "IDENTITY", p1: idParts[0] || "", p2: idParts[1] || "" });
+        }
+        s = rest.slice(bal ? bal.endIdx : 0).trim();
+      } else {
+        constraints.push({ name: kw, p1: "", p2: "" });
+        s = rest;
+      }
+    } else if (kw === "DEFAULT"){
+      var afterDefault = afterKw.replace(/^\s*/, "");
+      var nextKw = SQL_CONSTRAINT_KEYWORD_RE.exec(afterDefault);
+      var value = nextKw ? afterDefault.slice(0, nextKw.index).trim() : afterDefault.trim();
+      constraints.push({ name: "DEFAULT", p1: value, p2: "" });
+      s = nextKw ? afterDefault.slice(nextKw.index) : "";
+    }
+  }
+  return constraints;
+}
+// Reverte o comentário "restrição adicional: Nome (p1, p2), Outro Nome" (ver sqlConstraintClause/
+// generateSqlFromLogicalModel) de volta para instâncias de restrição -- usado para restrições
+// cadastradas cuja sintaxe SQL não é conhecida (por isso viram comentário, nunca cláusula inline).
+var SQL_EXTRA_CONSTRAINT_PREFIX = "restrição adicional:";
+function parseTrailingCommentConstraints(commentText){
+  var text = String(commentText || "");
+  var idx = text.toLowerCase().indexOf(SQL_EXTRA_CONSTRAINT_PREFIX.toLowerCase());
+  if (idx === -1) return [];
+  var rest = text.slice(idx + SQL_EXTRA_CONSTRAINT_PREFIX.length).trim();
+  return splitTopLevel(rest, ",").map(function(entry){
+    var m = /^(.*?)(?:\s*\(([^()]*)\))?$/.exec(entry.trim());
+    var name = (m ? m[1] : entry).trim();
+    var paramsStr = (m && m[2]) ? m[2] : "";
+    var parts = splitTopLevel(paramsStr, ",").map(function(x){ return x.trim(); }).filter(Boolean);
+    return { name: name, p1: parts[0] || "", p2: parts[1] || "" };
+  }).filter(function(c){ return c.name; });
+}
+// Extrai, do texto do SQL físico, um mapa "tabela\u0000coluna" -> {dataType, dataSize,
+// dataDecimals, constraints} -- só os campos que o usuário pediu para extrair de lá. Nunca lança
+// erro: qualquer linha/bloco que não reconheça é simplesmente ignorado.
+var SQL_COLUMN_DEF_RE = /^("(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^()]*)\))?\s*(.*)$/;
+function parsePhysicalSqlColumnEdits(sql){
+  var result = {};
+  if (!sql) return result;
+  var lines = String(sql).split("\n");
+  var currentTable = null;
+  var CREATE_RE = /^\s*CREATE\s+TABLE\s+("(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*$/i;
+  var CLOSE_RE = /^\s*\)\s*;?\s*$/;
+  for (var li = 0; li < lines.length; li++){
+    var rawLine = lines[li];
+    if (currentTable === null){
+      var mCreate = CREATE_RE.exec(rawLine);
+      if (mCreate) currentTable = unquoteSqlIdent(mCreate[1]);
+      continue;
+    }
+    if (CLOSE_RE.test(rawLine)){ currentTable = null; continue; }
+    var parts = splitLineComment(rawLine);
+    var code = parts.code.trim().replace(/,\s*$/, "").trim();
+    if (!code || /^PRIMARY\s+KEY\s*\(/i.test(code) || /^FOREIGN\s+KEY\s*\(/i.test(code)) continue;
+    var mCol = SQL_COLUMN_DEF_RE.exec(code);
+    if (!mCol) continue;
+    var colName = unquoteSqlIdent(mCol[1]);
+    var sizeParts = mCol[3] ? splitTopLevel(mCol[3], ",").map(function(x){ return x.trim(); }) : [];
+    result[currentTable + "\u0000" + colName] = {
+      dataType: mCol[2],
+      dataSize: sizeParts[0] || "",
+      dataDecimals: sizeParts[1] || "",
+      constraints: parseInlineConstraints(mCol[4]).concat(parseTrailingCommentConstraints(parts.comment))
+    };
+  }
+  return result;
+}
+
 // Sincroniza a caixa de SQL do Modelo Físico com `physicalSql` (chamada ao entrar na visão --
 // ver enterPhysicalView). A caixa é editável pelo usuário (ver o listener "input" em #sqlOutput);
 // esta função só empurra `physicalSql` para a tela, nunca o contrário.
@@ -5273,6 +5442,66 @@ function convertConceptualToLogical(conceptual){
   return logical;
 }
 
+// Pedido do usuário: "ao converter do modelo físico para o lógico, as restrições não estão sendo
+// criadas" (e, na mesma linha, "não coloca os tipos de dados de cada atributo, tais como: INT,
+// CHAR, VARCHAR, DECIMAL") -- "converter para o lógico" só pode significar clicar "Gerar Modelo
+// Lógico" (ver generateMode, abaixo), que sempre reconstrói as tabelas do zero a partir do modelo
+// conceitual atual (convertConceptualToLogical, acima). O modelo conceitual (notação Chen) não tem
+// como representar nem restrições de coluna (UNIQUE/CHECK/DEFAULT etc.) nem o tipo de dado
+// (columnsForAttr, acima, sempre usa VARCHAR(50) como rascunho neutro) -- então toda vez que o
+// lógico era regerado, tanto as restrições quanto o tipo/tamanho/decimais que o usuário já tinha
+// ajustado manualmente nas colunas do modelo lógico ANTERIOR se perdiam silenciosamente, voltando
+// sempre para VARCHAR(50) sem restrição nenhuma. Esperado pelo usuário: que essas edições (tipo de
+// dado e restrições) sejam preservadas na reconversão, não recriadas do zero (impossível -- o
+// conceitual não carrega nenhuma dessas informações).
+// Pedido do usuário (rodada seguinte): "quando da geração do modelo lógico a partir do modelo
+// físico, os tipos de dados e restrições devem ser extraídos do modelo físico (SQL)" -- isto é,
+// quando a reconversão parte da tela Física, a fonte preferida passa a ser o próprio texto do SQL
+// (que o usuário pode ter editado à mão -- ver parsePhysicalSqlColumnEdits), não o modelo lógico
+// anterior; `sqlEdits`, quando informado, é esse mapa já extraído do SQL, e tem prioridade sobre
+// o modelo lógico anterior coluna a coluna (cada coluna decide sozinha: se apareceu no SQL, usa o
+// que veio de lá -- tipo E restrições juntos, mesmo que o SQL não tenha restrição nenhuma pra ela
+// (o usuário pode ter apagado uma); senão, cai para o que já existia no modelo lógico anterior).
+// Como nem o conceitual nem o SQL (texto livre) guardam uma referência estável além do nome, o
+// único jeito de saber qual coluna nova corresponde a qual coluna antiga é pelo nome (tabela +
+// coluna) -- que se mantém estável entre duas conversões seguidas contanto que o usuário não
+// renomeie a entidade/atributo de origem no conceitual (nem a tabela/coluna no SQL, quando for a
+// fonte). Coluna cujo nome (tabela+coluna) não é encontrado em nenhuma das duas fontes (ex.:
+// coluna nova, ou entidade/atributo renomeado) simplesmente começa do jeito que sempre começou
+// (VARCHAR(50), sem restrição).
+function preserveLogicalColumnEditsAcrossRegeneration(oldLogical, newLogical, sqlEdits){
+  var byTableCol = {};
+  if (oldLogical && Array.isArray(oldLogical.nodes)){
+    oldLogical.nodes.forEach(function(t){
+      if (t.type !== "table" || !Array.isArray(t.columns)) return;
+      t.columns.forEach(function(c){
+        byTableCol[t.name + "\u0000" + c.name] = c;
+      });
+    });
+  }
+  newLogical.nodes.forEach(function(t){
+    if (t.type !== "table" || !Array.isArray(t.columns)) return;
+    t.columns.forEach(function(c){
+      var key = t.name + "\u0000" + c.name;
+      // O SQL (quando fornecido) tem prioridade sobre o modelo lógico anterior -- é a fonte mais
+      // recente e é a que o usuário pediu que valesse ao vir da tela Física.
+      var chosen = (sqlEdits && sqlEdits[key]) || byTableCol[key];
+      // Tipo de dado (e tamanho/decimais) -- só faz sentido reaproveitar do registro antigo quando
+      // ele tinha um tipo realmente definido; um registro antigo sem dataType (não deveria
+      // acontecer, mas por segurança) deixa o valor recém-gerado (VARCHAR/50) como está.
+      if (chosen && chosen.dataType){
+        c.dataType = String(chosen.dataType);
+        c.dataSize = String(chosen.dataSize || "");
+        c.dataDecimals = String(chosen.dataDecimals || "");
+      }
+      // Restrições de coluna (UNIQUE/CHECK/DEFAULT etc.).
+      c.constraints = (chosen && Array.isArray(chosen.constraints) && chosen.constraints.length) ? chosen.constraints.map(function(cst){
+        return { name: String(cst.name || ""), p1: String(cst.p1 || ""), p2: String(cst.p2 || "") };
+      }) : [];
+    });
+  });
+}
+
 // Converte o modelo lógico (tabelas) de volta num rascunho do modelo conceitual (DER em notação
 // Chen) — o caminho inverso de convertConceptualToLogical, seguindo heurísticas para reconhecer,
 // a partir da estrutura das colunas/chaves, os mesmos padrões que a conversão de ida produz:
@@ -6069,20 +6298,26 @@ function goToMode(target, force){
 // confirmação).
 //
 // Cada `target` tem uma única origem fixa, sempre a mesma não importa a tela atual (`mode`/
-// `physicalActive`): "logical" vem sempre do conceitual atual, "conceptual" vem sempre do lógico
-// atual (engenharia reversa), "physical" (SQL) vem sempre do lógico atual. Isso vale mesmo
-// quando o item "Gerar Modelo Lógico" é clicado a partir da tela Física alcançada pela própria
-// tela Lógica (`mode === "logical"`) -- caso mais comum na prática (montar as tabelas direto na
-// Lógica e só depois abrir o Físico para ver o SQL) -- porque "gerar o modelo lógico" só pode
-// significar reconvertê-lo a partir do conceitual, do mesmo jeito que aconteceria clicando o
-// mesmo item na tela Conceitual; não existe (nem faria sentido existir) uma "engenharia reversa"
-// do SQL de volta para o lógico. Antes, essa reconversão só acontecia quando `mode` já era
-// "conceptual"; quando `mode` já era "logical" o item virava sem efeito nenhum (pedido do
-// usuário, reincidente: "do Modelo Físico eu não estou conseguindo gerar o modelo lógico" --
-// esse é justamente o caminho mais comum, Lógica -> Física, então praticamente nunca gerava
-// nada). Note que isso é consistente com o próprio padrão já estabelecido para os outros dois
-// itens ("Gerar Modelo Conceitual"/"Gerar Modelo Físico"), que já sempre sobrescrevem a partir da
-// origem fixa deles, mesmo descartando conteúdo criado só no destino.
+// `physicalActive`): "logical" vem sempre da ESTRUTURA do conceitual atual (quais tabelas
+// existem, PK, FK -- ver convertConceptualToLogical), "conceptual" vem sempre do lógico atual
+// (engenharia reversa), "physical" (SQL) vem sempre do lógico atual. Isso vale mesmo quando o
+// item "Gerar Modelo Lógico" é clicado a partir da tela Física alcançada pela própria tela Lógica
+// (`mode === "logical"`) -- caso mais comum na prática (montar as tabelas direto na Lógica e só
+// depois abrir o Físico para ver o SQL) -- porque "gerar o modelo lógico" só pode significar
+// reconvertê-lo a partir do conceitual, do mesmo jeito que aconteceria clicando o mesmo item na
+// tela Conceitual: a estrutura das tabelas nunca vem de engenharia reversa do SQL. Antes, essa
+// reconversão só acontecia quando `mode` já era "conceptual"; quando `mode` já era "logical" o
+// item virava sem efeito nenhum (pedido do usuário, reincidente: "do Modelo Físico eu não estou
+// conseguindo gerar o modelo lógico" -- esse é justamente o caminho mais comum, Lógica -> Física,
+// então praticamente nunca gerava nada). Note que isso é consistente com o próprio padrão já
+// estabelecido para os outros dois itens ("Gerar Modelo Conceitual"/"Gerar Modelo Físico"), que já
+// sempre sobrescrevem a partir da origem fixa deles, mesmo descartando conteúdo criado só no
+// destino.
+// Duas exceções pontuais, pedidas depois: tipo de dado e restrições de cada coluna (que o
+// conceitual não tem como guardar) NÃO nascem sempre em branco na reconversão -- ver
+// preserveLogicalColumnEditsAcrossRegeneration, abaixo, que tenta reaproveitar o que já existia
+// (por nome de tabela+coluna), preferindo o texto do SQL físico (parsePhysicalSqlColumnEdits)
+// quando a tela atual é a Física, e caindo para o modelo lógico anterior nos demais casos.
 //
 // Chama goToMode(target, true) -- o "true" (force) importa especificamente para target==="logical"
 // alcançado a partir do Físico quando `mode` já era "logical": sem ele, exitPhysicalView achava
@@ -6090,8 +6325,18 @@ function goToMode(target, force){
 // acima, deixando o quadro mostrando o modelo antigo mesmo com logicalModel já correto por baixo.
 function generateMode(target){
   if (target === "logical"){
+    var previousLogicalModel = logicalModel;
+    // Pedido do usuário: "quando da geração do modelo lógico a partir do modelo físico, os tipos
+    // de dados e restrições devem ser extraídos do modelo físico (SQL)" -- só faz sentido (e só é
+    // pedido) quando a tela atual É a Física (physicalActive); nos demais casos (ex.: a partir da
+    // Conceitual) não há SQL nenhum na jogada, e o comportamento continua sendo reaproveitar do
+    // modelo lógico anterior, como antes.
+    var sqlEdits = physicalActive ? parsePhysicalSqlColumnEdits(physicalSql) : null;
     logicalModel = convertConceptualToLogical(conceptualModel);
-    showToast("Modelo lógico gerado a partir do diagrama conceitual atual.");
+    preserveLogicalColumnEditsAcrossRegeneration(previousLogicalModel, logicalModel, sqlEdits);
+    showToast(physicalActive
+      ? "Modelo lógico gerado a partir do diagrama conceitual atual (tipo de dado e restrições extraídos do SQL do Modelo Físico, quando a coluna correspondente existe lá)."
+      : "Modelo lógico gerado a partir do diagrama conceitual atual (tipo de dado e restrições já ajustados foram preservados quando a tabela/coluna correspondente ainda existe).");
   } else if (target === "conceptual"){
     conceptualModel = convertLogicalToConceptual(logicalModel);
     showToast("Modelo conceitual gerado a partir das tabelas do modelo lógico (engenharia reversa).");
