@@ -178,7 +178,9 @@
      correspondente à tela atual fica destacado (mesmo tratamento visual do botão ativo na barra
      de ferramentas, .tbtn.active), para o usuário saber onde está sem precisar ler o rótulo do
      botão que abre o menu. */
-  .mode-menu{ width:250px; }
+  /* Pedido do usuário: a janela de seleção de modelo abre alinhada à esquerda do botão (o botão
+     fica no canto superior esquerdo), em vez de alinhada à direita como os demais .dl-menu. */
+  .mode-menu{ width:250px; left:0; right:auto; }
   .mode-menu-item{ align-items:center; font-size:13px; justify-content:space-between; gap:10px; }
   .mode-menu-item.active{ background:var(--accent-fill); color:var(--accent-ink); font-weight:600; }
   .mode-menu-item-label{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -186,8 +188,12 @@
      atalhos" -- só os três itens base (Conceitual/Lógico/Físico) têm um atalho de teclado
      associado (ver MODE_BASE_ITEMS/modeMenuItemHtml); os itens "Gerar Modelo X" continuam sem
      nada aqui, já que não têm atalho próprio. */
-  .mode-menu-item-shortcut{
-    font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); flex-shrink:0;
+  /* O rótulo ocupa o espaço disponível e o atalho fica encostado à direita do item (o seletor
+     genérico ".dl-menu-item span" dava flex:1 aos dois spans, dividindo a largura entre eles). */
+  .mode-menu-item .mode-menu-item-label{ display:block; flex:1 1 auto; text-align:left; }
+  .mode-menu-item .mode-menu-item-shortcut{
+    display:block; flex:0 0 auto; margin-left:auto; text-align:right;
+    font-family:var(--font-mono); font-size:11px; color:var(--ink-soft);
   }
   .mode-menu-item.active .mode-menu-item-shortcut{ color:var(--accent-ink); }
 
@@ -4044,7 +4050,7 @@ function clearModeShortcutPending(){
 // elemento específico -- na visão Física a barra à direita já não aparece (ver applyModeUI), então
 // não há onde mostrá-la ali.
 function modeShortcutHintHtml(){
-  return '<p class="hint">Dica: use Ctrl+M seguido de C, L ou F para ir direto para o Modelo Conceitual, o Lógico ou o Físico, sem precisar abrir o menu no canto superior esquerdo.</p>';
+  return '<p class="hint">Dica: use Ctrl+MC, Ctrl+ML ou Ctrl+MF (mantendo o Ctrl pressionado) para ir direto para o Modelo Conceitual, o Lógico ou o Físico, sem precisar abrir o menu no canto superior esquerdo.</p>';
 }
 
 document.addEventListener("keydown", function(e){
@@ -6370,9 +6376,9 @@ function generateMode(target){
 // ele (ver MODE_SHORTCUT_KEYS/goToMode, perto do atalho de teclado Ctrl+M). Os itens "Gerar Modelo
 // X" (MODE_EXTRA_ITEMS_BY_CURRENT, abaixo) não têm atalho próprio, então ficam sem essa coluna.
 var MODE_BASE_ITEMS = [
-  { key:"conceptual", label:"Modelo Conceitual", shortcut:"Ctrl+M, C" },
-  { key:"logical", label:"Modelo Lógico", shortcut:"Ctrl+M, L" },
-  { key:"physical", label:"Modelo Físico", shortcut:"Ctrl+M, F" }
+  { key:"conceptual", label:"Modelo Conceitual", shortcut:"Ctrl+MC" },
+  { key:"logical", label:"Modelo Lógico", shortcut:"Ctrl+ML" },
+  { key:"physical", label:"Modelo Físico", shortcut:"Ctrl+MF" }
 ];
 var MODE_EXTRA_ITEMS_BY_CURRENT = {
   conceptual: [ { key:"logical", label:"Gerar Modelo Lógico" } ],
