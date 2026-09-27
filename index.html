@@ -200,18 +200,28 @@
   main{ flex:1; display:flex; min-height:0; }
 
   aside.toolbar{
-    width:190px; flex-shrink:0; background:var(--surface);
+    width:var(--toolbar-w, 190px); flex-shrink:0; background:var(--surface);
     border-right:1px solid var(--border);
     display:flex; flex-direction:column; min-height:0;
     transition:width .18s ease;
-    overflow:hidden;
+    overflow:hidden; position:relative;
   }
+  /* Pedido do usuário: redimensionar a barra lateral esquerda com o mouse -- uma alça fina na
+     borda direita da barra; arrastar muda a largura (--toolbar-w, salva nas preferências) e o
+     duplo clique volta ao tamanho padrão. Ver initToolbarResizer. */
+  .toolbar-resizer{
+    position:absolute; top:0; right:0; width:6px; height:100%;
+    cursor:col-resize; z-index:5; touch-action:none;
+  }
+  .toolbar-resizer:hover, aside.toolbar.resizing .toolbar-resizer{ background:var(--select); opacity:.45; }
+  aside.toolbar.resizing{ transition:none; user-select:none; }
+  aside.toolbar.collapsed:not(:hover) .toolbar-resizer{ display:none; }
   /* Mesmo recurso da janela de orientações (direita): desmarcando "Fixar" (com nada
      selecionado), a barra recolhe para uma tira fina — encostar o mouse nela (mesmo recolhida)
      ou selecionar um elemento no quadro a traz de volta (o :hover cobre o mouse; o JS remove a
      classe "collapsed" ao haver seleção). */
   aside.toolbar.collapsed{ width:14px; }
-  aside.toolbar.collapsed:hover{ width:190px; }
+  aside.toolbar.collapsed:hover{ width:var(--toolbar-w, 190px); }
   .toolbar-inner{
     flex:1; min-height:0; overflow-y:auto;
     padding:14px 12px 24px; display:flex; flex-direction:column; gap:16px;
@@ -656,6 +666,7 @@
     aside.panel-wrap.drawer-open{ transform:translateX(0); }
 
     .toolbar-pin-row, .panel-pin-row{ display:none; }
+    .toolbar-resizer{ display:none; }
 
     /* Alvos de toque maiores, para dedo em vez de cursor de mouse. */
     .hbtn{ padding:9px 13px; min-height:40px; }
@@ -859,6 +870,13 @@
         <svg viewBox="0 0 24 18"><polygon class="ic-stroke" points="12,1 23,9 12,17 1,9"/></svg>
         Relacionamento
       </button>
+      <!-- Pedido do usuário: objeto de Autorrelacionamento logo depois do Relacionamento -- um
+           relacionamento em que a MESMA entidade participa duas vezes, cada uma com um papel
+           (ex.: Funcionário "supervisiona" Funcionário). Ver placeSelfRelationshipOnEntity. -->
+      <button class="tbtn" data-add="selfrel" title="Relacionamento de uma entidade com ela mesma (ex.: Funcionário supervisiona Funcionário). Selecione a entidade e clique aqui, ou clique aqui e depois na entidade.">
+        <svg viewBox="0 0 24 18"><rect class="ic-stroke" x="1" y="10" width="9" height="7" rx="1"/><polygon class="ic-stroke" points="18,1 23,5 18,9 13,5"/><polyline class="ic-stroke" points="5.5,10 5.5,5 13,5"/><polyline class="ic-stroke" points="10,13.5 18,13.5 18,9"/></svg>
+        Autorrelacionamento
+      </button>
     </div>
     <div class="tgroup">
       <div class="tgroup-label">Atributos</div>
@@ -878,6 +896,30 @@
         Generalização / Especialização
       </button>
     </div>
+    </div>
+    <!-- Pedido do usuário: no modelo lógico, a categoria "Tabelas" vem antes de "Editar" -- por isso
+         o bloco só do modo lógico fica aqui, logo depois do bloco só do modo conceitual (os dois
+         nunca aparecem juntos; ver applyModeUI), e antes dos grupos compartilhados. -->
+    <div id="toolbarLogical" hidden>
+      <div class="tgroup">
+        <div class="tgroup-label">Tabelas</div>
+        <button class="tbtn" data-add="table" title="Adicionar uma nova tabela em branco">
+          <svg viewBox="0 0 24 18"><rect class="ic-stroke" x="1" y="1" width="22" height="16" rx="2"/><line class="ic-stroke" x1="1" y1="7" x2="23" y2="7"/></svg>
+          Tabela
+        </button>
+        <button class="tbtn" id="btnAddColumn" title="Adiciona uma coluna comum (campo) na tabela selecionada">
+          <svg viewBox="0 0 20 20"><rect class="ic-stroke" x="2" y="7" width="16" height="6" rx="1.4"/><line class="ic-stroke" x1="4.5" y1="10" x2="11" y2="10"/></svg>
+          Campo
+        </button>
+        <button class="tbtn" id="btnAddPkColumn" title="Adiciona uma coluna de chave primária na tabela selecionada">
+          <svg viewBox="0 0 20 20"><circle class="ic-stroke" cx="6" cy="6" r="3.4"/><line class="ic-stroke" x1="8.4" y1="8.4" x2="17" y2="17"/><line class="ic-stroke" x1="12.2" y1="12.2" x2="15" y2="9.4"/></svg>
+          Chave primária
+        </button>
+        <button class="tbtn" id="btnAddFkColumn" title="Adiciona uma coluna de chave estrangeira na tabela selecionada, referenciando outra tabela">
+          <svg viewBox="0 0 24 18"><circle class="ic-stroke" cx="5" cy="5" r="3"/><line class="ic-stroke" x1="7.1" y1="7.1" x2="12" y2="12"/><line class="ic-stroke" x1="10.2" y1="10.2" x2="12.2" y2="8.2"/><rect class="ic-stroke" x="15" y="9" width="8" height="7" rx="1.4"/></svg>
+          Chave estrangeira
+        </button>
+      </div>
     </div>
     <div class="tgroup">
       <div class="tgroup-label">Editar</div>
@@ -920,27 +962,6 @@
         </div>
       </div>
     </div>
-    <div id="toolbarLogical" hidden>
-      <div class="tgroup">
-        <div class="tgroup-label">Tabelas</div>
-        <button class="tbtn" data-add="table" title="Adicionar uma nova tabela em branco">
-          <svg viewBox="0 0 24 18"><rect class="ic-stroke" x="1" y="1" width="22" height="16" rx="2"/><line class="ic-stroke" x1="1" y1="7" x2="23" y2="7"/></svg>
-          Tabela
-        </button>
-        <button class="tbtn" id="btnAddColumn" title="Adiciona uma coluna comum (campo) na tabela selecionada">
-          <svg viewBox="0 0 20 20"><rect class="ic-stroke" x="2" y="7" width="16" height="6" rx="1.4"/><line class="ic-stroke" x1="4.5" y1="10" x2="11" y2="10"/></svg>
-          Campo
-        </button>
-        <button class="tbtn" id="btnAddPkColumn" title="Adiciona uma coluna de chave primária na tabela selecionada">
-          <svg viewBox="0 0 20 20"><circle class="ic-stroke" cx="6" cy="6" r="3.4"/><line class="ic-stroke" x1="8.4" y1="8.4" x2="17" y2="17"/><line class="ic-stroke" x1="12.2" y1="12.2" x2="15" y2="9.4"/></svg>
-          Chave primária
-        </button>
-        <button class="tbtn" id="btnAddFkColumn" title="Adiciona uma coluna de chave estrangeira na tabela selecionada, referenciando outra tabela">
-          <svg viewBox="0 0 24 18"><circle class="ic-stroke" cx="5" cy="5" r="3"/><line class="ic-stroke" x1="7.1" y1="7.1" x2="12" y2="12"/><line class="ic-stroke" x1="10.2" y1="10.2" x2="12.2" y2="8.2"/><rect class="ic-stroke" x="15" y="9" width="8" height="7" rx="1.4"/></svg>
-          Chave estrangeira
-        </button>
-      </div>
-    </div>
     <hr class="tdiv">
     <div class="tgroup">
       <button class="tbtn" id="btnAbout" title="Sobre o DER Fácil">
@@ -953,6 +974,7 @@
      <input type="checkbox" id="toolbarPinChk" checked>
      Fixar
    </label>
+   <div class="toolbar-resizer" id="toolbarResizer" title="Arraste para ajustar a largura da barra (duplo clique volta ao tamanho padrão)"></div>
   </aside>
 
   <div class="canvas-wrap">
@@ -1201,6 +1223,8 @@ var panelPinned = true;
 var toolbarWrapEl = document.getElementById("toolbarWrap");
 var toolbarPinChk = document.getElementById("toolbarPinChk");
 var toolbarPinned = true;
+var TOOLBAR_W_DEFAULT = 190, TOOLBAR_W_MIN = 150, TOOLBAR_W_MAX = 420;
+var toolbarWidth = TOOLBAR_W_DEFAULT;   // largura da barra esquerda ajustada com o mouse (ver initToolbarResizer)
 var toastWrap = document.getElementById("toastWrap");
 var projectNameInput = document.getElementById("projectName");
 var autosaveNote = document.getElementById("autosaveNote");
@@ -1222,7 +1246,7 @@ function setGridSize(v, skipSave){
 // para valerem em qualquer diagrama aberto depois, inclusive num navegador sem nada salvo ainda.
 function savePrefs(){
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ gridSize: GRID_SIZE, snapToGrid: snapToGrid, panelPinned: panelPinned, toolbarPinned: toolbarPinned }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ gridSize: GRID_SIZE, snapToGrid: snapToGrid, panelPinned: panelPinned, toolbarPinned: toolbarPinned, toolbarWidth: toolbarWidth }));
   } catch (err){ /* localStorage indisponível: preferências não persistem, mas o app segue funcionando */ }
 }
 function loadPrefs(){
@@ -1234,6 +1258,7 @@ function loadPrefs(){
     if (p && typeof p.snapToGrid === "boolean") snapToGrid = p.snapToGrid;
     if (p && typeof p.panelPinned === "boolean") panelPinned = p.panelPinned;
     if (p && typeof p.toolbarPinned === "boolean") toolbarPinned = p.toolbarPinned;
+    if (p && isFinite(Number(p.toolbarWidth))) toolbarWidth = clamp(Math.round(Number(p.toolbarWidth)), TOOLBAR_W_MIN, TOOLBAR_W_MAX);
   } catch (err){ /* ignora preferências corrompidas e usa os padrões */ }
 }
 
@@ -1265,6 +1290,45 @@ toolbarPinChk.addEventListener("change", function(){
   savePrefs();
   updateToolbarPin();
 });
+
+// Redimensionar a barra esquerda arrastando a alça da borda direita (.toolbar-resizer). A
+// largura vai para a variável CSS --toolbar-w (usada também pelo :hover da barra recolhida), é
+// limitada entre TOOLBAR_W_MIN e TOOLBAR_W_MAX e fica salva nas preferências. No celular a
+// barra é uma gaveta de largura fixa e a alça fica escondida (ver o @media no CSS).
+function applyToolbarWidth(){
+  toolbarWrapEl.style.setProperty("--toolbar-w", toolbarWidth + "px");
+}
+(function initToolbarResizer(){
+  var handle = document.getElementById("toolbarResizer");
+  handle.addEventListener("pointerdown", function(e){
+    if (e.button !== 0 || mobileLayoutMQ.matches) return;
+    e.preventDefault();
+    var startX = e.clientX, startW = toolbarWrapEl.getBoundingClientRect().width;
+    var pid = e.pointerId;
+    toolbarWrapEl.classList.add("resizing");
+    function onMove(ev){
+      if (ev.pointerId !== pid) return;
+      toolbarWidth = clamp(Math.round(startW + ev.clientX - startX), TOOLBAR_W_MIN, TOOLBAR_W_MAX);
+      applyToolbarWidth();
+    }
+    function onUp(ev){
+      if (ev.pointerId !== pid) return;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      toolbarWrapEl.classList.remove("resizing");
+      savePrefs();
+    }
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  });
+  handle.addEventListener("dblclick", function(){
+    toolbarWidth = TOOLBAR_W_DEFAULT;
+    applyToolbarWidth();
+    savePrefs();
+  });
+})();
 
 // ---------- gavetas no layout de celular ----------
 // Numa tela de celular, a barra de ferramentas e o painel de propriedades não cabem ao lado
@@ -2558,10 +2622,12 @@ function rebuildLogicalEdges(){
   state.edges = edges;
 }
 
-function renderEdge(edge, dimsById){
-  var a = getNode(edge.from), b = getNode(edge.to);
-  if (!a || !b) return;
-  var da = dimsById[a.id], db = dimsById[b.id];
+// Pontas "retas" de uma aresta (uma linha só, de borda a borda) -- o cálculo padrão usado por
+// quase todas as conexões. Separado em função própria para ser compartilhado por renderEdge,
+// updateConnectedEdgeDom e computeEdgeGeometry (que só o substitui nos casos especiais: laço de
+// uma tabela para ela mesma e duas ou mais participações entre o MESMO par entidade/relacionamento,
+// como no autorrelacionamento).
+function straightEdgeEndpoints(a, b, da, db){
   var pa = boundaryPoint(a, da, centerX(b, db), b.y);
   var pb = boundaryPoint(b, db, centerX(a, da), a.y);
   // Quando uma ponta é um atributo com "lineAxis" definido -- fica assim ao incluir um atributo
@@ -2607,11 +2673,153 @@ function renderEdge(edge, dimsById){
   if (b.type === "attribute" && b.lineAxis === "v" && !(a.type === "attribute" && a.lineAxis) && withinTopBottomRange(a, da, pb.x)){
     pa = edgeTopBottomPointAtX(a, da, pb.x, b.y);
   }
+  return { pa: pa, pb: pb };
+}
+
+// Arestas "irmãs": participações que ligam exatamente o MESMO par de nós (em qualquer sentido) --
+// é o caso do autorrelacionamento (a entidade participa DUAS vezes do mesmo relacionamento, uma
+// para cada papel). Desenhadas como linhas retas comuns, elas ficariam uma exatamente em cima da
+// outra; por isso computeEdgeGeometry abre as duas em caminhos diferentes (ver abaixo).
+function siblingEdgesOf(edge){
+  if (edge.kind !== "participation") return [edge];
+  return state.edges.filter(function(e){
+    return e.kind === "participation" &&
+      ((e.from === edge.from && e.to === edge.to) || (e.from === edge.to && e.to === edge.from));
+  });
+}
+// Geometria completa de uma aresta, como lista de pontos (polilinha) de "from" até "to":
+// - caso comum: 2 pontos (linha reta de straightEdgeEndpoints);
+// - laço (from === to, só acontece com FK de uma tabela para ela mesma no modelo lógico, vinda de
+//   um autorrelacionamento): um "gancho" retangular saindo pela direita e voltando por cima;
+// - duas participações entre o mesmo par (autorrelacionamento): dois caminhos em "L" pelos dois
+//   cantos do retângulo formado entre a entidade e o losango -- o desenho clássico dos livros
+//   (uma linha sai de cima/baixo da entidade e entra pela ponta lateral do losango; a outra sai
+//   pela lateral da entidade e entra pela ponta de cima/baixo do losango). Quando os dois estão
+//   alinhados demais para caber o "L" (ex.: losango logo acima da entidade), cai para duas linhas
+//   retas paralelas, afastadas uma da outra.
+function computeEdgeGeometry(edge, a, b, da, db){
+  if (a.id === b.id){
+    var hw = da.w / 2, hh = da.h / 2, out = 34;
+    var cx = centerX(a, da);
+    var p0 = { x: cx + hw, y: a.y - hh / 2 };
+    var p4 = { x: cx + hw / 2, y: a.y - hh };
+    return { pts: [p0, { x: p0.x + out, y: p0.y }, { x: p0.x + out, y: p4.y - out }, { x: p4.x, y: p4.y - out }, p4] };
+  }
+  var sibs = siblingEdgesOf(edge);
+  if (sibs.length >= 2){
+    var idx = sibs.indexOf(edge);
+    var ent = a.type === "entity" ? a : b, rel = ent === a ? b : a;
+    var de = ent === a ? da : db, dr = ent === a ? db : da;
+    var ecx = centerX(ent, de), rcx = centerX(rel, dr);
+    var dx = rcx - ecx, dy = rel.y - ent.y;
+    var margin = 14;
+    var fitsL = sibs.length === 2 &&
+      Math.abs(dx) > Math.max(de.w, dr.w) / 2 + margin &&
+      Math.abs(dy) > Math.max(de.h, dr.h) / 2 + margin;
+    var sx = dx >= 0 ? 1 : -1, sy = dy >= 0 ? 1 : -1;
+    var ptsER;
+    if (fitsL){
+      if (idx === 0){
+        // sai por cima/baixo da entidade, dobra no canto (entidade.x, losango.y) e entra pela
+        // ponta lateral do losango
+        ptsER = [ { x: ecx, y: ent.y + sy * de.h / 2 }, { x: ecx, y: rel.y }, { x: rcx - sx * dr.w / 2, y: rel.y } ];
+      } else {
+        // sai pela lateral da entidade, dobra no canto (losango.x, entidade.y) e entra pela ponta
+        // de cima/baixo do losango
+        ptsER = [ { x: ecx + sx * de.w / 2, y: ent.y }, { x: rcx, y: ent.y }, { x: rcx, y: rel.y - sy * dr.h / 2 } ];
+      }
+    } else {
+      // Alinhados demais para o "L": linhas retas paralelas, lado a lado. Mais na vertical ->
+      // linhas verticais deslocadas em X (saindo de cima/baixo da entidade e tocando a borda
+      // de cima/baixo do losango no mesmo deslocamento); mais na horizontal -> o mesmo em Y.
+      var k = (idx - (sibs.length - 1) / 2);
+      var side = k < 0 ? -1 : 1;
+      if (Math.abs(dy) >= Math.abs(dx)){
+        var offX = k * Math.min(de.w, dr.w) * 0.55;
+        ptsER = [ edgeTopBottomPointAtX(ent, de, ecx + offX, rel.y), edgeTopBottomPointAtX(rel, dr, rcx + offX, ent.y) ];
+        return { pts: ent === a ? ptsER : ptsER.slice().reverse(), side: side, axis: "v", sibIndex: idx };
+      }
+      var offY = k * Math.min(de.h - 6, dr.h * 0.8);
+      var yE = ent.y + offY, yR = rel.y + offY;
+      var hwR = dr.w / 2 * (1 - Math.min(0.95, Math.abs(offY) / (dr.h / 2)));
+      ptsER = [ { x: ecx + sx * de.w / 2, y: yE }, { x: rcx - sx * hwR, y: yR } ];
+      return { pts: ent === a ? ptsER : ptsER.slice().reverse(), side: side, axis: "h", sibIndex: idx };
+    }
+    return { pts: ent === a ? ptsER : ptsER.slice().reverse() };
+  }
+  var s = straightEdgeEndpoints(a, b, da, db);
+  return { pts: [s.pa, s.pb] };
+}
+function polylinePointsAttr(pts){
+  return pts.map(function(p){ return p.x + "," + p.y; }).join(" ");
+}
+// Ponto a uma fração "f" (0..1) do comprimento total da polilinha, medido a partir de pts[0].
+function pointAlongPolyline(pts, f){
+  var total = 0, i;
+  for (i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y);
+  var target = total * f, acc = 0;
+  for (i = 1; i < pts.length; i++){
+    var segLen = Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y);
+    if (acc + segLen >= target && segLen > 0){
+      var t = (target - acc) / segLen;
+      return { x: pts[i-1].x + (pts[i].x - pts[i-1].x) * t, y: pts[i-1].y + (pts[i].y - pts[i-1].y) * t };
+    }
+    acc += segLen;
+  }
+  return pts[pts.length - 1];
+}
+// Onde ficam a pílula (min,max) e o texto do papel de uma participação. Linha reta: mesmas
+// posições de sempre (pílula a 30% a partir da entidade; papel no meio, um pouco acima). Caminho
+// em "L" (autorrelacionamento): a pílula no meio do trecho que sai da entidade e o papel no meio
+// do trecho que chega ao losango, deslocado para FORA do "retângulo" formado pelos dois caminhos,
+// para não ficar em cima da linha nem entre as duas.
+function participationLabelSpots(pts, entityAtStart, a, b, geo){
+  var ep = entityAtStart ? pts : pts.slice().reverse();
+  if (ep.length === 2 && geo && geo.axis){
+    // Linhas paralelas do autorrelacionamento (fallback sem "L"): pílulas em alturas diferentes
+    // para não encostarem uma na outra, e o papel ao lado de FORA de cada linha.
+    var tp = 0.28 + (geo.sibIndex % 2) * 0.32;
+    var pillP = { x: ep[0].x + (ep[1].x - ep[0].x) * tp, y: ep[0].y + (ep[1].y - ep[0].y) * tp };
+    var midP = { x: (ep[0].x + ep[1].x) / 2, y: (ep[0].y + ep[1].y) / 2 };
+    var roleP = geo.axis === "v"
+      ? { x: midP.x + geo.side * 22, y: midP.y, anchor: geo.side > 0 ? "start" : "end" }
+      : { x: midP.x, y: midP.y + (geo.side > 0 ? 13 : -10), anchor: "middle" };
+    if (geo.axis === "v"){ roleP.y = ep[0].y + (ep[1].y - ep[0].y) * (tp < 0.5 ? 0.62 : 0.3); }
+    return { pill: pillP, role: roleP };
+  }
+  if (ep.length === 2){
+    var t = 0.30;
+    var mx = (ep[0].x + ep[1].x) / 2, my = (ep[0].y + ep[1].y) / 2;
+    return {
+      pill: { x: ep[0].x + (ep[1].x - ep[0].x) * t, y: ep[0].y + (ep[1].y - ep[0].y) * t },
+      role: { x: mx, y: my - 10, anchor: "middle" }
+    };
+  }
+  var pill = { x: (ep[0].x + ep[1].x) / 2, y: (ep[0].y + ep[1].y) / 2 };
+  var q1 = ep[ep.length - 2], q2 = ep[ep.length - 1];
+  var rx = (q1.x + q2.x) / 2, ry = (q1.y + q2.y) / 2;
+  var loopCx = (a.x + b.x) / 2, loopCy = (a.y + b.y) / 2;
+  var role;
+  if (Math.abs(q1.y - q2.y) < 0.5){
+    role = { x: rx, y: ry + (ry < loopCy ? -10 : 13), anchor: "middle" };
+  } else {
+    role = rx < loopCx ? { x: rx - 7, y: ry, anchor: "end" } : { x: rx + 7, y: ry, anchor: "start" };
+  }
+  return { pill: pill, role: role };
+}
+
+function renderEdge(edge, dimsById){
+  var a = getNode(edge.from), b = getNode(edge.to);
+  if (!a || !b) return;
+  var da = dimsById[a.id], db = dimsById[b.id];
+  var geo = computeEdgeGeometry(edge, a, b, da, db);
+  var pts = geo.pts;
+  var ptsAttr = polylinePointsAttr(pts);
   var selected = selectedEdgeIds.has(edge.id);
 
   var g = svgEl("g", {});
-  var hit = svgEl("line", { class:"edge-hit", x1:pa.x, y1:pa.y, x2:pb.x, y2:pb.y });
-  var line = svgEl("line", { class:"edge-line" + (selected ? " selected" : ""), x1:pa.x, y1:pa.y, x2:pb.x, y2:pb.y });
+  var hit = svgEl("polyline", { class:"edge-hit", points:ptsAttr });
+  var line = svgEl("polyline", { class:"edge-line" + (selected ? " selected" : ""), points:ptsAttr });
   g.appendChild(hit); g.appendChild(line);
 
   function onEdgeSelect(e){
@@ -2628,12 +2836,8 @@ function renderEdge(edge, dimsById){
 
   var bgEl = null, txtEl = null, rtxtEl = null;
   if (edge.kind === "participation"){
-    var entityNode = a.type === "entity" ? a : b;
-    var entityPoint = a.type === "entity" ? pa : pb;
-    var otherPoint = a.type === "entity" ? pb : pa;
-    var t = 0.30;
-    var px = entityPoint.x + (otherPoint.x - entityPoint.x) * t;
-    var py = entityPoint.y + (otherPoint.y - entityPoint.y) * t;
+    var spots = participationLabelSpots(pts, a.type === "entity", a, b, geo);
+    var px = spots.pill.x, py = spots.pill.y;
     var label = "(" + (edge.min || "0") + "," + (edge.max || "N") + ")";
     var tw = Math.max(30, measureTextWidth(label) + 10);
     var bg = svgEl("rect", { class:"card-pill-bg", x:px-tw/2, y:py-9, width:tw, height:18, rx:4 });
@@ -2645,8 +2849,8 @@ function renderEdge(edge, dimsById){
     bgEl = bg; txtEl = txt;
 
     if (edge.role){
-      var mx = (pa.x+pb.x)/2, my = (pa.y+pb.y)/2;
-      var rtxt = svgEl("text", { class:"role-text", x:mx, y:my-10 });
+      var rtxt = svgEl("text", { class:"role-text", x:spots.role.x, y:spots.role.y });
+      rtxt.style.textAnchor = spots.role.anchor;
       rtxt.textContent = edge.role;
       g.appendChild(rtxt);
       rtxtEl = rtxt;
@@ -2660,10 +2864,10 @@ function renderEdge(edge, dimsById){
     // ponta — a mesma que aparecia junto de cada entidade no diagrama conceitual.
     if (edge.cardChild){
       var cLabel = "(" + (edge.cardChild.min || "0") + "," + (edge.cardChild.max || "N") + ")";
-      var cx2 = pa.x + (pb.x - pa.x) * 0.25, cy2 = pa.y + (pb.y - pa.y) * 0.25;
+      var cp = pointAlongPolyline(pts, 0.25);
       var ctw = Math.max(30, measureTextWidth(cLabel) + 10);
-      var cbg = svgEl("rect", { class:"card-pill-bg", x:cx2-ctw/2, y:cy2-9, width:ctw, height:18, rx:4 });
-      var ctxt = svgEl("text", { class:"card-pill-text", x:cx2, y:cy2+1 });
+      var cbg = svgEl("rect", { class:"card-pill-bg", x:cp.x-ctw/2, y:cp.y-9, width:ctw, height:18, rx:4 });
+      var ctxt = svgEl("text", { class:"card-pill-text", x:cp.x, y:cp.y+1 });
       ctxt.textContent = cLabel;
       g.appendChild(cbg); g.appendChild(ctxt);
       cbg.addEventListener("pointerdown", onEdgeSelect);
@@ -2672,10 +2876,10 @@ function renderEdge(edge, dimsById){
     }
     if (edge.cardParent){
       var pLabel = "(" + (edge.cardParent.min || "0") + "," + (edge.cardParent.max || "N") + ")";
-      var px2 = pa.x + (pb.x - pa.x) * 0.75, py2 = pa.y + (pb.y - pa.y) * 0.75;
+      var pp = pointAlongPolyline(pts, 0.75);
       var ptw = Math.max(30, measureTextWidth(pLabel) + 10);
-      var pbg = svgEl("rect", { class:"card-pill-bg", x:px2-ptw/2, y:py2-9, width:ptw, height:18, rx:4 });
-      var ptxt = svgEl("text", { class:"card-pill-text", x:px2, y:py2+1 });
+      var pbg = svgEl("rect", { class:"card-pill-bg", x:pp.x-ptw/2, y:pp.y-9, width:ptw, height:18, rx:4 });
+      var ptxt = svgEl("text", { class:"card-pill-text", x:pp.x, y:pp.y+1 });
       ptxt.textContent = pLabel;
       g.appendChild(pbg); g.appendChild(ptxt);
       pbg.addEventListener("pointerdown", onEdgeSelect);
@@ -2689,7 +2893,9 @@ function renderEdge(edge, dimsById){
 }
 
 /* Reposiciona (sem recriar) as arestas ligadas a um nó — usado durante o arraste, para manter
-   a captura do ponteiro no elemento original e permitir mover por vários pixels seguidos. */
+   a captura do ponteiro no elemento original e permitir mover por vários pixels seguidos. Usa a
+   mesma computeEdgeGeometry de renderEdge, então o ajuste de "lineAxis" dos atributos e os
+   caminhos em "L" do autorrelacionamento acompanham o arraste, sem "pular" ao soltar. */
 function updateConnectedEdgeDom(nodeId){
   state.edges.forEach(function(edge){
     if (edge.from !== nodeId && edge.to !== nodeId) return;
@@ -2698,59 +2904,39 @@ function updateConnectedEdgeDom(nodeId){
     var a = getNode(edge.from), b = getNode(edge.to);
     if (!a || !b) return;
     var da = a._dims || computeDims(a), db = b._dims || computeDims(b);
-    var pa = boundaryPoint(a, da, centerX(b, db), b.y);
-    var pb = boundaryPoint(b, db, centerX(a, da), a.y);
-    // Mesmo ajuste de "lineAxis" usado em renderEdge (ver lá o porquê) -- mantém a ponta do
-    // atributo entrando reta nele durante o próprio arraste (não só depois, no render() final),
-    // pra não "pular" de uma diagonal pra uma linha reta assim que o arraste termina.
-    if (a.type === "attribute" && a.lineAxis){
-      pa = a.lineAxis === "v" ? attrVerticalLeftPoint(a, da, b.y) : boundaryPoint(a, da, b.x, a.y);
-    }
-    if (b.type === "attribute" && b.lineAxis){
-      pb = b.lineAxis === "v" ? attrVerticalLeftPoint(b, db, a.y) : boundaryPoint(b, db, a.x, b.y);
-    }
-    // Mesmo ajuste de eixo "v" usado em renderEdge (ver lá o porquê) -- mantém a linha inteira reta,
-    // com origem distribuída na borda do outro nó, durante o próprio arraste.
-    if (a.type === "attribute" && a.lineAxis === "v" && !(b.type === "attribute" && b.lineAxis) && withinTopBottomRange(b, db, pa.x)){
-      pb = edgeTopBottomPointAtX(b, db, pa.x, a.y);
-    }
-    if (b.type === "attribute" && b.lineAxis === "v" && !(a.type === "attribute" && a.lineAxis) && withinTopBottomRange(a, da, pb.x)){
-      pa = edgeTopBottomPointAtX(a, da, pb.x, b.y);
-    }
-    refs.line.setAttribute("x1", pa.x); refs.line.setAttribute("y1", pa.y);
-    refs.line.setAttribute("x2", pb.x); refs.line.setAttribute("y2", pb.y);
-    refs.hit.setAttribute("x1", pa.x); refs.hit.setAttribute("y1", pa.y);
-    refs.hit.setAttribute("x2", pb.x); refs.hit.setAttribute("y2", pb.y);
-    if (edge.kind === "participation" && refs.bg && refs.txt){
-      var entityPoint = a.type === "entity" ? pa : pb;
-      var otherPoint = a.type === "entity" ? pb : pa;
-      var t = 0.30;
-      var px = entityPoint.x + (otherPoint.x - entityPoint.x) * t;
-      var py = entityPoint.y + (otherPoint.y - entityPoint.y) * t;
-      var label = "(" + (edge.min || "0") + "," + (edge.max || "N") + ")";
-      var tw = Math.max(30, measureTextWidth(label) + 10);
-      refs.bg.setAttribute("x", px - tw/2); refs.bg.setAttribute("y", py - 9); refs.bg.setAttribute("width", tw);
-      refs.txt.setAttribute("x", px); refs.txt.setAttribute("y", py + 1);
+    var geo = computeEdgeGeometry(edge, a, b, da, db);
+    var pts = geo.pts;
+    var ptsAttr = polylinePointsAttr(pts);
+    refs.line.setAttribute("points", ptsAttr);
+    refs.hit.setAttribute("points", ptsAttr);
+    if (edge.kind === "participation"){
+      var spots = participationLabelSpots(pts, a.type === "entity", a, b, geo);
+      if (refs.bg && refs.txt){
+        var label = "(" + (edge.min || "0") + "," + (edge.max || "N") + ")";
+        var tw = Math.max(30, measureTextWidth(label) + 10);
+        refs.bg.setAttribute("x", spots.pill.x - tw/2); refs.bg.setAttribute("y", spots.pill.y - 9); refs.bg.setAttribute("width", tw);
+        refs.txt.setAttribute("x", spots.pill.x); refs.txt.setAttribute("y", spots.pill.y + 1);
+      }
+      if (refs.rtxt){
+        refs.rtxt.setAttribute("x", spots.role.x); refs.rtxt.setAttribute("y", spots.role.y);
+        refs.rtxt.style.textAnchor = spots.role.anchor;
+      }
     }
     if (edge.kind === "fk"){
       if (refs.bgChild && refs.txtChild && edge.cardChild){
         var cLabel = "(" + (edge.cardChild.min || "0") + "," + (edge.cardChild.max || "N") + ")";
-        var cx2 = pa.x + (pb.x - pa.x) * 0.25, cy2 = pa.y + (pb.y - pa.y) * 0.25;
+        var cp = pointAlongPolyline(pts, 0.25);
         var ctw = Math.max(30, measureTextWidth(cLabel) + 10);
-        refs.bgChild.setAttribute("x", cx2 - ctw/2); refs.bgChild.setAttribute("y", cy2 - 9); refs.bgChild.setAttribute("width", ctw);
-        refs.txtChild.setAttribute("x", cx2); refs.txtChild.setAttribute("y", cy2 + 1);
+        refs.bgChild.setAttribute("x", cp.x - ctw/2); refs.bgChild.setAttribute("y", cp.y - 9); refs.bgChild.setAttribute("width", ctw);
+        refs.txtChild.setAttribute("x", cp.x); refs.txtChild.setAttribute("y", cp.y + 1);
       }
       if (refs.bgParent && refs.txtParent && edge.cardParent){
         var pLabel = "(" + (edge.cardParent.min || "0") + "," + (edge.cardParent.max || "N") + ")";
-        var px2 = pa.x + (pb.x - pa.x) * 0.75, py2 = pa.y + (pb.y - pa.y) * 0.75;
+        var pp = pointAlongPolyline(pts, 0.75);
         var ptw = Math.max(30, measureTextWidth(pLabel) + 10);
-        refs.bgParent.setAttribute("x", px2 - ptw/2); refs.bgParent.setAttribute("y", py2 - 9); refs.bgParent.setAttribute("width", ptw);
-        refs.txtParent.setAttribute("x", px2); refs.txtParent.setAttribute("y", py2 + 1);
+        refs.bgParent.setAttribute("x", pp.x - ptw/2); refs.bgParent.setAttribute("y", pp.y - 9); refs.bgParent.setAttribute("width", ptw);
+        refs.txtParent.setAttribute("x", pp.x); refs.txtParent.setAttribute("y", pp.y + 1);
       }
-    }
-    if (refs.rtxt){
-      var mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
-      refs.rtxt.setAttribute("x", mx); refs.rtxt.setAttribute("y", my - 10);
     }
   });
 }
@@ -2962,6 +3148,12 @@ function attachNodeHandlers(g, node){
       // outro atributo (composição) já cria o novo atributo posicionado ao redor do alvo E liga
       // os dois automaticamente — evita ter que soltar num ponto vazio do quadro e depois entrar
       // no modo "Conectar" só para ligar o que acabou de ser criado.
+      if (pendingAdd.type === "selfrel" && node.type === "entity" && e.button === 0){
+        var stickySelf = pendingAdd.sticky ? { type:"selfrel", sticky:true } : null;
+        pendingAdd = stickySelf;
+        placeSelfRelationshipOnEntity(node);
+        return;
+      }
       if (pendingAdd.type === "attribute" && e.button === 0 &&
           (node.type === "entity" || node.type === "relationship" || node.type === "attribute")){
         var kind = pendingAdd.kind || "simple";
@@ -3429,6 +3621,32 @@ function collectAttributeDescendants(rootId){
   return result;
 }
 
+// Cria um autorrelacionamento para "entity": um losango acima e à direita dela, ligado DUAS vezes
+// à mesma entidade (uma participação para cada papel). As duas linhas são desenhadas como caminhos
+// em "L" que não se sobrepõem (ver computeEdgeGeometry). Cardinalidade inicial (0,N) nos dois
+// lados -- com mínimo 1, toda ocorrência precisaria de outra ocorrência da mesma entidade, o que
+// raramente é o caso. Pedido do usuário: os papéis começam VAZIOS -- o usuário preenche no painel
+// ao selecionar cada linha (ex.: "supervisor" / "supervisionado"), se quiser.
+function selfRelationshipPosition(entity, relDims){
+  var de = computeDims(entity);
+  var dr = relDims || { w:130, h:64 };
+  var x = centerX(entity, de) + de.w / 2 + dr.w / 2 + 60;
+  var y = entity.y - de.h / 2 - dr.h / 2 - 50;
+  if (snapToGrid){ x = snapValue(x); y = snapValue(y); }
+  return { x:x, y:y };
+}
+function placeSelfRelationshipOnEntity(entity){
+  var rel = addNodeAt("relationship", {}, entity.x, entity.y);
+  var pos = selfRelationshipPosition(entity, computeDims(rel));
+  rel.x = pos.x; rel.y = pos.y;
+  state.edges.push({ id: uid("ed"), from:entity.id, to:rel.id, kind:"participation", min:"0", max:"N", role:"" });
+  state.edges.push({ id: uid("ed"), from:entity.id, to:rel.id, kind:"participation", min:"0", max:"N", role:"" });
+  selectedNodeIds = new Set([rel.id]);
+  selectedEdgeIds = new Set();
+  render();
+  showToast('Autorrelacionamento criado em "' + (entity.name || "") + '" — dê um nome ao relacionamento e selecione cada linha para definir o papel e a cardinalidade.');
+}
+
 function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey){
   var targetDims = computeDims(target);
   var targetCx = centerX(target, targetDims);
@@ -3849,6 +4067,12 @@ stageEl.addEventListener("pointerdown", function(e){
           handleGeneralizationDrop(pt);
           return;
         }
+        // Autorrelacionamento não existe solto: precisa de uma entidade. Mantém a ferramenta
+        // ativa e só avisa, para o usuário clicar em cima da entidade desejada.
+        if (pendingAdd.type === "selfrel"){
+          showToast("Clique em cima de uma entidade para criar o autorrelacionamento dela.", "warn");
+          return;
+        }
         var opts = {};
         if (pendingAdd.type === "entity") opts.weak = !!pendingAdd.weak;
         if (pendingAdd.type === "relationship") opts.identifying = !!pendingAdd.identifying;
@@ -3905,6 +4129,15 @@ document.querySelectorAll(".tbtn[data-add]").forEach(function(btn){
     // selecionado (só entidade ou relacionamento), senão cada atributo criado ficaria selecionado
     // e o próximo clique o encadearia como sub-atributo dele, em vez de criar outro atributo do
     // mesmo alvo original.
+    // Autorrelacionamento: com uma entidade selecionada, o clique no botão já cria o losango e as
+    // duas ligações na hora (mesma ideia do atributo logo abaixo).
+    if (type === "selfrel" && selectedNodeIds.size === 1){
+      var selEnt = getNode(Array.from(selectedNodeIds)[0]);
+      if (selEnt && selEnt.type === "entity"){
+        placeSelfRelationshipOnEntity(selEnt);
+        return;
+      }
+    }
     if (type === "attribute" && selectedNodeIds.size === 1){
       var selNode = getNode(Array.from(selectedNodeIds)[0]);
       if (selNode && (selNode.type === "entity" || selNode.type === "relationship")){
@@ -3938,7 +4171,9 @@ document.querySelectorAll(".tbtn[data-add]").forEach(function(btn){
     // menciona as duas opções só para essa ferramenta.
     var baseMsg = type === "attribute"
       ? "Clique direto numa entidade/relacionamento/atributo para criar já conectado a ele, ou em um ponto vazio do quadro para deixá-lo solto."
-      : "Clique em um ponto vazio do quadro para posicionar o novo elemento.";
+      : type === "selfrel"
+        ? "Clique na entidade que vai se relacionar com ela mesma."
+        : "Clique em um ponto vazio do quadro para posicionar o novo elemento.";
     showToast(sticky ? baseMsg + " A ferramenta vai continuar ativa para você incluir vários — clique no botão de novo para desligar." : baseMsg);
   });
 });
@@ -4860,6 +5095,9 @@ function updatePanel(){
         '<option value="1"' + (ed.max==="1"?" selected":"") + '>1</option>' +
         '<option value="N"' + (ed.max==="N"?" selected":"") + '>N</option>' +
         '</select></div></div>';
+      // Papel da entidade nesta participação -- essencial no autorrelacionamento (ex.:
+      // "supervisor" x "supervisionado"), opcional nos demais. Aparece em itálico junto da linha.
+      html2 += '<div class="field"><label for="pf-role">Papel</label><input type="text" id="pf-role" placeholder="ex.: supervisor" value="' + escapeHtml(ed.role || "") + '"></div>';
     } else if (ed.kind === "fk"){
       var fkChildTable = getNode(ed.from), fkParentTable = getNode(ed.to);
       var cChild = ed.cardChild || { min:"0", max:"N" };
@@ -4890,6 +5128,11 @@ function updatePanel(){
     if (ed.kind === "participation"){
       document.getElementById("pf-min").addEventListener("change", function(e){ ed.min = e.target.value; render(); });
       document.getElementById("pf-max").addEventListener("change", function(e){ ed.max = e.target.value; render(); });
+      document.getElementById("pf-role").addEventListener("input", function(e){
+        ed.role = e.target.value; render();
+        var roleEl = document.getElementById("pf-role");
+        if (roleEl){ roleEl.focus(); roleEl.setSelectionRange(e.target.value.length, e.target.value.length); }
+      });
     } else if (ed.kind === "fk"){
       document.getElementById("pf-fk-cchild-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "min", e.target.value); render(); });
       document.getElementById("pf-fk-cchild-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "max", e.target.value); render(); });
@@ -5402,8 +5645,16 @@ function convertConceptualToLogical(conceptual){
       var cardB = { min: pb.edge.min || "0", max: pb.edge.max || "N" };
       // A chave composta (as duas FKs que juntas formam a PK da associativa) vem sempre no
       // início da tabela; os atributos próprios do relacionamento (quando existem) vêm depois.
-      pkA.forEach(function(pk){ junction.columns.push({ name: slugColumnName(tableA.name) + "_" + pk.name, dataType:pk.dataType, dataSize:pk.dataSize, pk:true, fk:true, fkTable:tableA.id, fkColumn:pk.name, cardChild:cardB, cardParent:entityCardConst }); });
-      pkB.forEach(function(pk){ junction.columns.push({ name: slugColumnName(tableB.name) + "_" + pk.name, dataType:pk.dataType, dataSize:pk.dataSize, pk:true, fk:true, fkTable:tableB.id, fkColumn:pk.name, cardChild:cardA, cardParent:entityCardConst }); });
+      // Autorrelacionamento N:N (tableA === tableB): as duas FKs apontam para a MESMA tabela, então
+      // o nome "tabela_pk" colidiria. Usa o papel de cada lado (ex.: "orientador_id" /
+      // "orientando_id") e, sem papel, numera a segunda ("pessoa_id" / "pessoa_id_2").
+      var isSelfJunction = tableA === tableB;
+      function junctionColName(table, edge, pk, second){
+        if (isSelfJunction && edge.role && edge.role.trim()) return slugColumnName(edge.role) + "_" + pk.name;
+        return slugColumnName(table.name) + "_" + pk.name + (isSelfJunction && second ? "_2" : "");
+      }
+      pkA.forEach(function(pk){ junction.columns.push({ name: junctionColName(tableA, pa.edge, pk, false), dataType:pk.dataType, dataSize:pk.dataSize, pk:true, fk:true, fkTable:tableA.id, fkColumn:pk.name, cardChild:cardB, cardParent:entityCardConst }); });
+      pkB.forEach(function(pk){ junction.columns.push({ name: junctionColName(tableB, pb.edge, pk, true), dataType:pk.dataType, dataSize:pk.dataSize, pk:true, fk:true, fkTable:tableB.id, fkColumn:pk.name, cardChild:cardA, cardParent:entityCardConst }); });
       junction.columns = junction.columns.concat(relCols);
       logical.nodes.push(junction);
     } else {
@@ -5420,6 +5671,10 @@ function convertConceptualToLogical(conceptual){
       var relCardParent = { min: oneSideEdge.min || "0", max: oneSideEdge.max || "N" };
       pkOne.forEach(function(pk){
         var colName = slugColumnName(oneSide.name) + "_" + pk.name;
+        // Autorrelacionamento 1:N / 1:1: a FK fica na própria tabela, apontando para ela mesma. O
+        // nome segue o papel do lado "um" (ex.: "supervisor_id" em Funcionario), que diz o que a
+        // coluna guarda melhor que "funcionario_id".
+        if (manySide === oneSide && oneSideEdge.role && oneSideEdge.role.trim()) colName = slugColumnName(oneSideEdge.role) + "_" + pk.name;
         if (manySide.columns.some(function(c){ return c.name === colName; })){
           if (!usedRelFkColumns[manySide.id + "|" + colName]){
             // já existe uma coluna com esse nome, mas não foi este Passo 5 que a criou (veio de
@@ -5559,6 +5814,15 @@ function convertLogicalToConceptual(logical){
   function addEdge(fromId, toId, opts){
     conceptual.edges.push(Object.assign({ id: uid("ed"), from:fromId, to:toId, kind:"plain" }, opts || {}));
   }
+  // "supervisor_id" (FK para a coluna "id") -> "supervisor": recupera o papel que a conversão de
+  // ida usou para nomear a coluna de um autorrelacionamento.
+  function roleFromFkColumn(col){
+    if (!col) return "";
+    var suffix = "_" + (col.fkColumn || "");
+    var nm = col.name || "";
+    if (col.fkColumn && nm.length > suffix.length && nm.slice(-suffix.length) === suffix) return nm.slice(0, -suffix.length);
+    return nm;
+  }
   // Distribui uma lista de colunas como atributos simples de "owner" (entidade ou relacionamento),
   // numa fileira abaixo dele, centralizada — mesmo espaçamento usado em placeAttributeOnNode.
   function layoutColumnsAsAttributes(owner, cols){
@@ -5611,6 +5875,21 @@ function convertLogicalToConceptual(logical){
         bCols: fpk.filter(function(c){ return c.fkTable === refs[1]; })
       };
       return;
+    }
+    // Tabela associativa de um autorrelacionamento N:N: todas as colunas da PK são FKs para a MESMA
+    // tabela, cada coluna referenciada aparecendo exatamente duas vezes (uma por papel). Sem este
+    // caso ela cairia como "subclasse"/entidade fraca abaixo.
+    if (fpk.length >= 2 && refs.length === 1 && nfpk.length === 0){
+      var refCount = {};
+      fpk.forEach(function(c){ refCount[c.fkColumn] = (refCount[c.fkColumn] || 0) + 1; });
+      var allTwice = Object.keys(refCount).every(function(k){ return refCount[k] === 2; });
+      if (allTwice){
+        var seenRef = {}, selfA = [], selfB = [];
+        fpk.forEach(function(c){ if (seenRef[c.fkColumn]) selfB.push(c); else { seenRef[c.fkColumn] = true; selfA.push(c); } });
+        kindOf[t.id] = "junction";
+        junctionInfo[t.id] = { aId: refs[0], bId: refs[0], aCols: selfA, bCols: selfB, self: true };
+        return;
+      }
     }
     if (fpk.length && refs.length === 1){
       var ownerId = refs[0], ownerTable = tableById[ownerId];
@@ -5731,9 +6010,20 @@ function convertLogicalToConceptual(logical){
     // convertConceptualToLogical.
     var cardA = cardOf(info.bCols, "cardChild", { min:"0", max:"N" });
     var cardB = cardOf(info.aCols, "cardChild", { min:"0", max:"N" });
-    var rel = addNode("relationship", {}, t.x, t.y);
-    addEdge(a.id, rel.id, { kind:"participation", min:cardA.min, max:cardA.max });
-    addEdge(b.id, rel.id, { kind:"participation", min:cardB.min, max:cardB.max });
+    var rel;
+    if (info.self){
+      // Autorrelacionamento N:N: losango na posição padrão do autorrelacionamento e o papel de
+      // cada lado recuperado do nome da coluna ("orientador_id" -> "orientador").
+      rel = addNode("relationship", {}, a.x, a.y);
+      var selfPosJ = selfRelationshipPosition(a, computeDims(rel));
+      rel.x = selfPosJ.x; rel.y = selfPosJ.y;
+      addEdge(a.id, rel.id, { kind:"participation", min:cardA.min, max:cardA.max, role: roleFromFkColumn(info.aCols[0]) });
+      addEdge(b.id, rel.id, { kind:"participation", min:cardB.min, max:cardB.max, role: roleFromFkColumn(info.bCols[0]) });
+    } else {
+      rel = addNode("relationship", {}, t.x, t.y);
+      addEdge(a.id, rel.id, { kind:"participation", min:cardA.min, max:cardA.max });
+      addEdge(b.id, rel.id, { kind:"participation", min:cardB.min, max:cardB.max });
+    }
     var relCols = (t.columns || []).filter(function(c){ return !c.pk; });
     layoutColumnsAsAttributes(rel, relCols);
   });
@@ -5754,6 +6044,17 @@ function convertLogicalToConceptual(logical){
       var cols = groups[refId];
       var manyCard = cardOf(cols, "cardChild", { min:"0", max:"N" });
       var oneCard = cardOf(cols, "cardParent", { min:"1", max:"1" });
+      if (oneEnt === manyEnt){
+        // FK de uma tabela para ela mesma -> autorrelacionamento 1:N. O papel do lado "um" vem do
+        // nome da coluna ("supervisor_id" -> "supervisor"); o outro lado fica sem papel
+        // (vazio), para o usuário preencher se quiser.
+        var selfRel = addNode("relationship", {}, oneEnt.x, oneEnt.y);
+        var selfPos = selfRelationshipPosition(oneEnt, computeDims(selfRel));
+        selfRel.x = selfPos.x; selfRel.y = selfPos.y;
+        addEdge(oneEnt.id, selfRel.id, { kind:"participation", min:oneCard.min, max:oneCard.max, role: roleFromFkColumn(cols[0]) });
+        addEdge(manyEnt.id, selfRel.id, { kind:"participation", min:manyCard.min, max:manyCard.max, role:"" });
+        return;
+      }
       var mx = (oneEnt.x + manyEnt.x) / 2, my = (oneEnt.y + manyEnt.y) / 2;
       if (Math.abs(oneEnt.x - manyEnt.x) < 40 && Math.abs(oneEnt.y - manyEnt.y) < 40) my += 90;
       var rel = addNode("relationship", {}, mx, my);
@@ -6784,6 +7085,7 @@ document.getElementById("btnManageConstraints").addEventListener("click", functi
 isDarkTheme = computeInitialDarkTheme();
 applyTheme();
 loadPrefs();
+applyToolbarWidth();
 loadDataTypePrefs();
 loadConstraintPrefs();
 loadInitialState();
