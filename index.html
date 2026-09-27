@@ -232,10 +232,13 @@
     font-size:12.5px; color:var(--ink-soft); white-space:nowrap; cursor:pointer;
   }
   .toolbar-pin-row input{ flex-shrink:0; cursor:pointer; }
+  /* Pedido do usuário: títulos das categorias (e o botão "Sobre") em negrito -- peso 800 e cor
+     do texto principal, já que o 600 em cinza claro de antes quase não se distinguia. */
   .tgroup-label{
-    font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
-    color:var(--ink-soft); padding:0 2px;
+    font-size:10.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink); padding:0 2px;
   }
+  #btnAbout{ font-weight:700; }
   .tgroup{ display:flex; flex-direction:column; gap:5px; }
   #toolbarConceptual, #toolbarLogical{ display:flex; flex-direction:column; gap:16px; }
   .tbtn{
@@ -2439,7 +2442,54 @@ function edgeTopBottomPointAtX(node, dims, x, towardY){
 /* ---------- viewBox / pan / zoom ---------- */
 function applyViewBox(){
   stageEl.setAttribute("viewBox", view.x + " " + view.y + " " + view.w + " " + view.h);
+  scheduleSaveView();
 }
+// Pedido do usuário: ao reabrir o DER Fácil, a tela volta com o mesmo zoom/posição de antes.
+// Toda mudança de enquadramento passa por applyViewBox (zoom, arraste do quadro, "ajustar à
+// tela"), então é aqui que ele é gravado -- com um pequeno atraso, para não escrever no
+// localStorage a cada pixel de um arraste. Guardado por modo (conceitual/lógico), já que cada
+// um tem o seu próprio diagrama e enquadramento. Ver restoreSavedView (inicialização).
+var VIEW_KEY = "estudioDER.view.v1";
+var saveViewTimer = null;
+var viewRestoreReady = false; // só começa a gravar depois da inicialização (senão o enquadramento padrão sobrescreveria o salvo)
+function scheduleSaveView(){
+  if (!viewRestoreReady) return;
+  clearTimeout(saveViewTimer);
+  saveViewTimer = setTimeout(saveViewNow, 300);
+}
+function saveViewNow(){
+  clearTimeout(saveViewTimer);
+  if (!viewRestoreReady) return;
+  try {
+    var all = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") || {};
+    // Grava a área EFETIVAMENTE visível: o SVG encaixa o viewBox no quadro mantendo a proporção
+    // ("meet"), então, se a proporção dos dois diferir, aparece um pouco mais do que o viewBox
+    // numa das direções -- é isso que o usuário vê, e é isso que deve voltar.
+    var r = stageEl.getBoundingClientRect();
+    var vis = { x: view.x, y: view.y, w: view.w, h: view.h };
+    if (r.width > 0 && r.height > 0){
+      var sc = Math.min(r.width / view.w, r.height / view.h);
+      var vw = r.width / sc, vh = r.height / sc;
+      vis = { x: view.x + view.w / 2 - vw / 2, y: view.y + view.h / 2 - vh / 2, w: vw, h: vh };
+    }
+    all[mode] = vis;
+    localStorage.setItem(VIEW_KEY, JSON.stringify(all));
+  } catch (err){ /* localStorage indisponível: o enquadramento só não fica salvo */ }
+}
+// Restaura o enquadramento salvo do modo atual (a área que estava visível). Se a janela tiver
+// outro tamanho agora, o encaixe "meet" do SVG garante que toda essa área continue aparecendo.
+// Retorna false quando não há nada salvo (a inicialização então usa fitToContent).
+function restoreSavedView(){
+  try {
+    var all = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") || {};
+    var v = all[mode];
+    if (!v || !isFinite(v.x) || !isFinite(v.y) || !(v.w > 0) || !(v.h > 0)) return false;
+    view = { x: v.x, y: v.y, w: v.w, h: v.h };
+    applyViewBox();
+    return true;
+  } catch (err){ return false; }
+}
+window.addEventListener("pagehide", saveViewNow);
 function screenToSvg(clientX, clientY){
   var r = stageEl.getBoundingClientRect();
   return {
@@ -7093,7 +7143,9 @@ projectNameInput.value = state.projectName;
 applyModeUI();
 setGridSize(GRID_SIZE, true);
 render();
-fitToContent();
+if (!restoreSavedView()) fitToContent();
+viewRestoreReady = true;
+saveViewNow();
 
 // Tela cheia ao abrir: a maioria dos navegadores só concede tela cheia em resposta direta a um
 // gesto do usuário (clique/tecla), então uma tentativa automática assim que a página carrega
