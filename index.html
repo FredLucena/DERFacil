@@ -1084,19 +1084,28 @@ function sortDataTypes(list){
 }
 sortDataTypes(customDataTypes);
 
-// Restrições cadastradas (ex.: UNIQUE, CHECK, DEFAULT) pelo painel "Gerenciar restrições",
-// semelhante à lista de tipos de dados acima -- inclusive na quantidade de parâmetros (0, 1 ou 2,
-// ver paramCountSelectHtml perto de DEFAULT_DATA_TYPE_NAMES): 0 quando a restrição não precisa de
-// nenhum parâmetro (ex.: UNIQUE), 1 quando precisa de um (ex.: o valor de DEFAULT, ou a expressão
-// de CHECK) e 2 quando precisa de dois (ex.: uma FOREIGN KEY, que referencia tabela + coluna).
+// Restrições cadastradas (ex.: UNIQUE, CHECK, DEFAULT, IDENTITY, NOT NULL) pelo painel "Gerenciar
+// restrições", semelhante à lista de tipos de dados acima -- inclusive na quantidade de parâmetros
+// (0, 1 ou 2, ver paramCountSelectHtml perto de DEFAULT_DATA_TYPE_NAMES): 0 quando a restrição não
+// precisa de nenhum parâmetro (ex.: UNIQUE, NOT NULL), 1 quando precisa de um (ex.: o valor de
+// DEFAULT, ou a expressão de CHECK) e 2 quando precisa de dois (ex.: IDENTITY, que recebe valor
+// inicial + incremento; ou uma FOREIGN KEY, que referencia tabela + coluna).
 // Cada restrição tem ainda uma descrição opcional (texto livre explicando a regra). Esta lista
 // alimenta o combo de restrições no final da configuração de cada coluna do modelo lógico (ver
 // renderTablePanel) -- lá, cada coluna guarda suas PRÓPRIAS instâncias em c.constraints (qual
 // restrição cadastrada foi escolhida + o(s) valor(es) de parâmetro digitados para ela).
+// Pedido do usuário: ao iniciar (sem nenhuma restrição já cadastrada neste navegador -- ver
+// loadConstraintPrefs, que só sobrescreve esta lista quando há algo salvo em CONSTRAINTS_KEY),
+// as cinco restrições abaixo devem existir de cara: CHECK (1 parâmetro), DEFAULT (1 parâmetro),
+// IDENTITY (2 parâmetros), NOT NULL (sem parâmetro) e UNIQUE (sem parâmetro) -- os mesmos cinco
+// nomes que o parser do SQL físico já reconhece (ver SQL_CONSTRAINT_KEYWORD_RE) e que
+// sqlConstraintClause já sabe gerar de volta em SQL.
 var DEFAULT_CONSTRAINTS = [
-  { name: "UNIQUE", description: "Garante que o valor da coluna não se repete entre as linhas da tabela.", params: 0 },
   { name: "CHECK", description: "Restringe os valores aceitos pela coluna a uma condição (ex.: idade >= 0).", params: 1 },
-  { name: "DEFAULT", description: "Define um valor padrão usado quando nenhum é informado ao inserir a linha.", params: 1 }
+  { name: "DEFAULT", description: "Define um valor padrão usado quando nenhum é informado ao inserir a linha.", params: 1 },
+  { name: "IDENTITY", description: "Gera automaticamente um valor sequencial para a coluna, a partir de um valor inicial e um incremento.", params: 2 },
+  { name: "NOT NULL", description: "Impede que a coluna fique sem valor (nulo) em alguma linha.", params: 0 },
+  { name: "UNIQUE", description: "Garante que o valor da coluna não se repete entre as linhas da tabela.", params: 0 }
 ];
 var customConstraints = DEFAULT_CONSTRAINTS.map(function(c){
   return { name: c.name, description: c.description, params: c.params };
