@@ -450,6 +450,23 @@
     max-width:480px; width:92%; padding:22px; max-height:82vh; overflow-y:auto;
   }
   .modal-box h2{ font-family:var(--font-display); font-size:19px; margin:0 0 6px; }
+  /* Tela de ajuda de atalhos (F1) -- ver showShortcutsHelp. */
+  .modal-box.help-box{ max-width:660px; }
+  .help-section{ margin-top:16px; }
+  .help-section h3{
+    font-size:10.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink); margin:0 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border-soft);
+  }
+  .help-row{ display:grid; grid-template-columns:minmax(150px, 38%) 1fr; gap:12px; padding:5px 0; font-size:13px; align-items:baseline; }
+  .help-row + .help-row{ border-top:1px dashed var(--border-soft); }
+  .help-keys{ display:flex; flex-wrap:wrap; gap:4px; align-items:baseline; color:var(--ink-soft); font-size:12px; }
+  .help-desc{ color:var(--ink); line-height:1.45; }
+  kbd{
+    display:inline-block; font-family:var(--font-mono); font-size:11.5px; line-height:1;
+    padding:3px 6px; border-radius:5px; background:var(--surface-2); color:var(--ink);
+    border:1px solid var(--border); border-bottom-width:2px; white-space:nowrap;
+  }
+  @media (max-width:560px){ .help-row{ grid-template-columns:1fr; gap:3px; } }
   .modal-box p{ font-size:13.5px; color:var(--ink-soft); line-height:1.5; }
   .modal-box a{ color:var(--select); text-decoration:underline; }
   .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
@@ -6912,6 +6929,109 @@ async function downloadAppHtml(){
 }
 document.getElementById("btnDownloadApp").addEventListener("click", downloadAppHtml);
 
+/* ---------- ajuda de atalhos (F1) ---------- */
+// Pedido do usuário: F1 mostra uma tela com todas as teclas de atalho e o que cada uma faz. A
+// lista abaixo espelha o que está implementado de fato nos handlers de teclado/mouse (o
+// "keydown" principal, perto de updateToolbarActive; Espaço/panorâmica; roda do mouse; laço com
+// Shift; Alt para ignorar a grade; Ctrl+clique nos botões da barra; menu do botão direito) --
+// ao criar ou mudar um atalho, atualizar também aqui. F1 de novo, Esc ou "Fechar" fecham a tela.
+var SHORTCUT_HELP = [
+  { title: "Geral", rows: [
+    [["F1"], "Abre ou fecha esta tela de ajuda."],
+    [["Esc"], "Cancela a ferramenta ativa ou o modo Conectar; sem nada ativo, limpa a seleção. Também fecha menus e janelas."],
+    [["Ctrl+Z"], "Desfaz a última ação."],
+    [["Ctrl+Y", "Ctrl+Shift+Z"], "Refaz a ação desfeita."]
+  ]},
+  { title: "Trocar de modelo", rows: [
+    [["Ctrl+MC"], "Vai para o Modelo Conceitual."],
+    [["Ctrl+ML"], "Vai para o Modelo Lógico."],
+    [["Ctrl+MF"], "Vai para o Modelo Físico (SQL)."],
+    [null, "Mantenha o Ctrl pressionado enquanto aperta M e, em seguida, a letra."]
+  ]},
+  { title: "Edição de elementos", rows: [
+    [["Delete", "Backspace"], "Exclui os elementos ou conexões selecionados."],
+    [["Ctrl+C"], "Copia os elementos selecionados."],
+    [["Ctrl+V"], "Cola os elementos copiados (no mesmo modelo em que foram copiados)."],
+    [["Qualquer letra"], "Com um único elemento selecionado, começa a renomeá-lo: a letra substitui o nome e o cursor vai para o campo Nome."]
+  ]},
+  { title: "Alinhar atributos (entidade ou relacionamento selecionado)", rows: [
+    [["Ctrl+AE"], "Alinha os atributos à esquerda."],
+    [["Ctrl+AD"], "Alinha os atributos à direita."],
+    [["Ctrl+AC"], "Alinha os atributos acima."],
+    [["Ctrl+AB"], "Alinha os atributos abaixo."],
+    [["Ctrl+A"], "Sozinho: aplica o próximo alinhamento da sequência a cada vez."],
+    [["Botão direito"], "Sobre a entidade ou o relacionamento: abre o menu de alinhamento."]
+  ]},
+  { title: "Mouse e quadro", rows: [
+    [["Roda do mouse"], "Aproxima ou afasta o zoom."],
+    [["Espaço + arrastar", "Botão do meio"], "Move o quadro (panorâmica)."],
+    [["Shift + arrastar"], "Num ponto vazio do quadro: seleciona em laço os elementos dentro do retângulo."],
+    [["Shift + clique"], "Adiciona ou remove um elemento da seleção."],
+    [["Alt + soltar/arrastar"], "Posiciona ou move sem encaixar na grade."],
+    [["Ctrl + clique no botão"], "Nos botões da barra (inclusive Conectar): deixa a ferramenta fixa para usar várias vezes seguidas; clique de novo para desligar."],
+    [["Duplo clique na borda"], "Na borda direita da barra esquerda: volta à largura padrão."]
+  ]}
+];
+var shortcutsHelpBackdrop = null;
+function closeShortcutsHelp(){
+  if (shortcutsHelpBackdrop){ shortcutsHelpBackdrop.remove(); shortcutsHelpBackdrop = null; }
+}
+function keysHtml(keys){
+  if (!keys) return "";
+  return keys.map(function(k){
+    // Cada tecla de uma combinação vira um <kbd>; textos descritivos (ex.: "+ arrastar") ficam
+    // como texto comum ao lado.
+    var parts = k.split(/\s\+\s/);
+    return parts.map(function(part, i){
+      var isKey = /^(Ctrl|Cmd|Shift|Alt|Esc|Espaço|Delete|Backspace|F\d+)(\+|$)/.test(part); // só teclas viram <kbd>; gestos de mouse ("arrastar", "Botão do meio") ficam como texto
+      return (i ? '<span>+</span>' : '') + (isKey ? '<kbd>' + escapeHtml(part) + '</kbd>' : '<span>' + escapeHtml(part) + '</span>');
+    }).join("");
+  }).join('<span>ou</span>');
+}
+function showShortcutsHelp(){
+  if (shortcutsHelpBackdrop){ closeShortcutsHelp(); return; }
+  var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  var html = '<div class="modal-box help-box" role="dialog" aria-modal="true" aria-labelledby="helpTitle">' +
+    '<h2 id="helpTitle">Teclas de atalho</h2>' +
+    '<p>Os atalhos de teclado não funcionam enquanto o cursor está num campo de texto (exceto F1 e Esc).' +
+    (isMac ? ' No Mac, use <kbd>Cmd</kbd> no lugar de <kbd>Ctrl</kbd>.' : ' No Mac, use Cmd no lugar de Ctrl.') + '</p>';
+  SHORTCUT_HELP.forEach(function(sec){
+    html += '<div class="help-section"><h3>' + escapeHtml(sec.title) + '</h3>';
+    sec.rows.forEach(function(r){
+      html += '<div class="help-row"><div class="help-keys">' + keysHtml(r[0]) + '</div><div class="help-desc">' + escapeHtml(r[1]) + '</div></div>';
+    });
+    html += '</div>';
+  });
+  html += '<div class="modal-actions"><button data-a="close" class="primary">Fechar</button></div></div>';
+  var backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = html;
+  document.body.appendChild(backdrop);
+  shortcutsHelpBackdrop = backdrop;
+  backdrop.addEventListener("click", function(e){ if (e.target === backdrop) closeShortcutsHelp(); });
+  var closeBtn = backdrop.querySelector('[data-a="close"]');
+  closeBtn.addEventListener("click", closeShortcutsHelp);
+  closeBtn.focus({ preventScroll: true });
+  backdrop.querySelector(".help-box").scrollTop = 0;
+}
+// Fase de captura: F1 funciona de qualquer lugar (inclusive dentro de um campo) e não abre a
+// ajuda do próprio navegador; com a ajuda aberta, Esc só fecha a ajuda (não chega aos outros
+// atalhos, que limpariam a seleção ou cancelariam a ferramenta ativa por baixo dela).
+document.addEventListener("keydown", function(e){
+  if (e.key === "F1"){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    showShortcutsHelp();
+    return;
+  }
+  if (shortcutsHelpBackdrop && e.key === "Escape"){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    closeShortcutsHelp();
+  }
+}, true);
+window.addEventListener("help", function(e){ e.preventDefault(); }); // navegadores antigos (IE/Edge legado) abrem a própria ajuda com F1
+
 /* ---------- sobre / marca ---------- */
 var APP_VERSION = "2.0";
 // Tela "Sobre": acessível tanto pelo nome da marca no cabeçalho quanto pelo botão "Sobre" no
@@ -6934,6 +7054,7 @@ function showAboutModal(){
       'responsabilidade pela revisão, validação e adequação dos modelos criados é de quem os utiliza — ' +
       'o DER Fácil é um apoio ao ensino e ao trabalho, e não substitui a análise técnica necessária antes ' +
       'de aplicar um modelo em um sistema real.</p>' +
+      '<p>Pressione <kbd>F1</kbd> a qualquer momento para ver todas as teclas de atalho.</p>' +
       '<p>Registre <a href="mailto:suportederfacil@gmail.com">aqui</a> a sua contribuição para a melhoria da ferramenta.</p>' +
       '<div class="modal-actions"><button data-a="close" class="primary">Fechar</button></div>' +
     '</div>';
