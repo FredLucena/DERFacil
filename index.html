@@ -157,6 +157,8 @@
   }
   .dl-menu-item:hover{ background:var(--surface-2); }
   .dl-menu-item svg{ width:19px; height:19px; flex-shrink:0; margin-top:1px; }
+  /* ícones do menu "Organizar atributos" são só traço, sem cor própria -- sem isto ficavam invisíveis */
+  .align-menu-box .dl-menu-item svg{ stroke:var(--ink-soft); }
   .dl-menu-item span{ display:flex; flex-direction:column; gap:1px; flex:1; min-width:0; }
   .dl-menu-item strong{ font-size:13px; font-weight:600; }
   .dl-menu-item small{ font-size:11.5px; color:var(--ink-soft); line-height:1.35; }
@@ -456,7 +458,21 @@
   }
   .modal-box h2{ font-family:var(--font-display); font-size:19px; margin:0 0 6px; }
   /* Tela de ajuda de atalhos (F1) -- ver showShortcutsHelp. */
-  .modal-box.help-box{ max-width:660px; }
+  /* Pedido do usuário: a janela de atalhos pode ser redimensionada (alça no canto inferior
+     direito, "resize" nativo do navegador) e o tamanho escolhido fica salvo -- ver
+     showShortcutsHelp/HELP_SIZE_KEY. Os limites evitam uma janela minúscula ou maior que a tela. */
+  .modal-box.help-box{
+    width:660px; height:82vh; max-width:96vw; max-height:94vh; min-width:320px; min-height:220px;
+    padding:0; overflow:hidden; position:relative; display:flex; flex-direction:column;
+  }
+  .help-scroll{ flex:1; min-height:0; overflow-y:auto; padding:22px 22px 6px; }
+  .help-box .modal-actions{ margin:0; padding:12px 22px 16px; border-top:1px solid var(--border-soft); flex-shrink:0; }
+  .help-resize{
+    position:absolute; right:0; bottom:0; width:18px; height:18px; cursor:nwse-resize; touch-action:none;
+    background:linear-gradient(135deg, transparent 50%, var(--border) 50%, var(--border) 60%, transparent 60%, transparent 70%, var(--border) 70%, var(--border) 80%, transparent 80%);
+    border-bottom-right-radius:12px;
+  }
+  .help-resize:hover{ background-color:var(--surface-2); }
   .help-section{ margin-top:16px; }
   .help-section h3{
     font-size:10.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
@@ -1793,7 +1809,7 @@ function askChoice3(title, msg, choices){
 // Modal com um campo numérico (usado ao soltar o triângulo de Generalização sobre uma entidade —
 // ver placeGeneralizationOnEntity). Resolve com o número escolhido (sempre um inteiro dentro de
 // [minValue,maxValue]) ou com null se o usuário cancelar (clicando fora ou em "Cancelar").
-function askNumberPrompt(title, msg, defaultValue, minValue, maxValue){
+function askNumberPrompt(title, msg, defaultValue, minValue, maxValue, fieldLabel, okLabel){
   return new Promise(function(resolve){
     var backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -1801,11 +1817,11 @@ function askNumberPrompt(title, msg, defaultValue, minValue, maxValue){
       '<div class="modal-box">' +
         '<h2>' + escapeHtml(title) + '</h2>' +
         '<p>' + escapeHtml(msg) + '</p>' +
-        '<div class="field"><label for="numPromptInput">Quantidade de entidades</label>' +
+        '<div class="field"><label for="numPromptInput">' + escapeHtml(fieldLabel || "Quantidade de entidades") + '</label>' +
         '<input type="number" id="numPromptInput" min="' + minValue + '" max="' + maxValue + '" step="1" value="' + defaultValue + '"></div>' +
         '<div class="modal-actions">' +
           '<button data-a="cancel">Cancelar</button>' +
-          '<button data-a="ok" class="primary">Criar</button>' +
+          '<button data-a="ok" class="primary">' + escapeHtml(okLabel || "Criar") + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(backdrop);
@@ -3341,6 +3357,23 @@ function attachNodeHandlers(g, node){
       e.preventDefault();
       e.stopPropagation();
       if (pendingAdd || connectMode) return; // não faz sentido abrir o menu no meio de outra ação
+      // Pedido do usuário: com VÁRIAS entidades/relacionamentos selecionados, o botão direito sobre
+      // um deles mantém a seleção e o alinhamento escolhido vale para TODOS (os que têm atributos).
+      if (selectedNodeIds.has(node.id)){
+        var group = Array.from(selectedNodeIds).map(getNode).filter(function(n){ return n && (n.type === "entity" || n.type === "relationship"); });
+        // TODOS os objetos do modelo selecionados (anotações não contam): o menu também oferece
+        // "Disposição vertical/horizontal" do modelo inteiro (ver layoutWholeModel).
+        var allSelected = state.nodes.every(function(n){ return n.type === "note" || selectedNodeIds.has(n.id); });
+        if (group.length >= 2 || (allSelected && group.length)){
+          var withAttrs = group.filter(function(n){ return connectedAttributesOf(n).length; });
+          if (!withAttrs.length && !allSelected){
+            showToast("Nenhum dos elementos selecionados tem atributos para organizar.", "warn");
+            return;
+          }
+          showAttributeAlignMenu(withAttrs.length ? withAttrs : group, { layoutOptions: allSelected });
+          return;
+        }
+      }
       selectedNodeIds = new Set([node.id]);
       selectedEdgeIds = new Set();
       render();
@@ -3705,6 +3738,295 @@ function collectAttributeDescendants(rootId){
 // lados -- com mínimo 1, toda ocorrência precisaria de outra ocorrência da mesma entidade, o que
 // raramente é o caso. Pedido do usuário: os papéis começam VAZIOS -- o usuário preenche no painel
 // ao selecionar cada linha (ex.: "supervisor" / "supervisionado"), se quiser.
+// Pedido do usuário: com várias entidades selecionadas (sem relacionamento entre si), clicar em
+// "Relacionamento" liga todas elas EM SEQUÊNCIA -- A–B, B–C, C–D... (N entidades -> N-1
+// relacionamentos). A ordem segue a posição no quadro: da esquerda para a direita e, empatando
+// no X, de cima para baixo. Cada relacionamento fica a meio caminho entre as duas entidades, com
+// participação (1,N) nos dois lados -- o mesmo padrão de "Conectar" entre duas entidades. Um par
+// que JÁ tem um relacionamento entre si é pulado (não duplica).
+function entitiesAlreadyRelated(a, b){
+  return state.nodes.some(function(r){
+    if (r.type !== "relationship") return false;
+    var hasA = false, hasB = false;
+    state.edges.forEach(function(e){
+      if (e.kind !== "participation") return;
+      var other = e.from === r.id ? e.to : (e.to === r.id ? e.from : null);
+      if (other === a.id) hasA = true;
+      if (other === b.id) hasB = true;
+    });
+    return hasA && hasB;
+  });
+}
+// Relacionamento binário que liga exatamente "a" e "b" (o primeiro encontrado), ou null.
+function binaryRelationshipBetween(a, b){
+  for (var i = 0; i < state.nodes.length; i++){
+    var r = state.nodes[i];
+    if (r.type !== "relationship") continue;
+    var others = state.edges.filter(function(e){ return e.kind === "participation" && (e.from === r.id || e.to === r.id); })
+      .map(function(e){ return e.from === r.id ? e.to : e.from; });
+    if (others.length === 2 && ((others[0] === a.id && others[1] === b.id) || (others[0] === b.id && others[1] === a.id))) return r;
+  }
+  return null;
+}
+// Move um nó junto com os atributos ligados a ele (direta ou indiretamente).
+function moveNodeWithAttributes(node, dx, dy){
+  if (!dx && !dy) return;
+  node.x += dx; node.y += dy;
+  collectAttributeDescendants(node.id).forEach(function(at){ at.x += dx; at.y += dy; });
+}
+// Extensão horizontal de um nó somado aos seus atributos (para espaçar sem sobrepor).
+function horizontalExtentWithAttributes(node){
+  var nodes = [node].concat(collectAttributeDescendants(node.id));
+  var minX = Infinity, maxX = -Infinity;
+  nodes.forEach(function(n){
+    var d = computeDims(n), cx = centerX(n, d);
+    minX = Math.min(minX, cx - d.w / 2); maxX = Math.max(maxX, cx + d.w / 2);
+  });
+  return { left: node.x - minX, right: maxX - node.x };
+}
+// Pedido do usuário (rodada seguinte): ao ligar as entidades em sequência, elas também ficam
+// ALINHADAS (todas na mesma altura -- a da entidade mais à esquerda) e ESPAÇADAS de forma
+// uniforme, com o losango de cada par centralizado no espaço entre as duas. O espaço leva em
+// conta a largura de cada entidade E dos atributos ligados a ela (que vão junto ao mover), e a
+// largura do losango, deixando a mesma folga (CHAIN_GAP) de cada lado dele.
+var CHAIN_GAP = 70;
+// Extensão vertical de um nó somado aos seus atributos (mesma ideia, no eixo Y).
+function verticalExtentWithAttributes(node){
+  var nodes = [node].concat(collectAttributeDescendants(node.id));
+  var minY = Infinity, maxY = -Infinity;
+  nodes.forEach(function(n){
+    var d = computeDims(n);
+    minY = Math.min(minY, n.y - d.h / 2); maxY = Math.max(maxY, n.y + d.h / 2);
+  });
+  return { before: node.y - minY, after: maxY - node.y };
+}
+// Pedido do usuário (rodada seguinte): a fileira é HORIZONTAL quando as entidades selecionadas
+// estão mais espalhadas na horizontal (diferença de X maior que a de Y) e VERTICAL quando estão
+// mais espalhadas na vertical. Na vertical, a ordem é de cima para baixo e todas ficam na
+// coluna (X) da entidade mais acima.
+function linkSelectedEntitiesInChain(entities){
+  var xs = entities.map(function(n){ return n.x; }), ys = entities.map(function(n){ return n.y; });
+  var vertical = (Math.max.apply(null, ys) - Math.min.apply(null, ys)) > (Math.max.apply(null, xs) - Math.min.apply(null, xs));
+  var ordered = entities.slice().sort(vertical
+    ? function(p, q){ return (p.y - q.y) || (p.x - q.x); }
+    : function(p, q){ return (p.x - q.x) || (p.y - q.y); });
+  var created = [], skipped = 0, relBetween = [];
+  for (var i = 0; i < ordered.length - 1; i++){
+    var a = ordered[i], b = ordered[i + 1];
+    if (entitiesAlreadyRelated(a, b)){ skipped++; relBetween.push(binaryRelationshipBetween(a, b)); continue; }
+    var rel = addNodeAt("relationship", {}, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    state.edges.push({ id: uid("ed"), from:a.id, to:rel.id, kind:"participation", min:"1", max:"N", role:"" });
+    state.edges.push({ id: uid("ed"), from:b.id, to:rel.id, kind:"participation", min:"1", max:"N", role:"" });
+    created.push(rel.id);
+    relBetween.push(rel);
+  }
+  // Atributos que ficariam no caminho das linhas da fileira passam para o lado livre: numa
+  // fileira horizontal, atributos à esquerda/direita da entidade vão para cima; numa vertical,
+  // atributos acima/abaixo (o padrão) vão para a direita.
+  ordered.forEach(function(ent){
+    if (!connectedAttributesOf(ent).length) return;
+    var m = ent.attrAlignMode || "top";
+    if (vertical && (m === "top" || m === "bottom")) alignEntityAttributes(ent, "right");
+    if (!vertical && (m === "left" || m === "right")) alignEntityAttributes(ent, "top");
+  });
+  // Alinha e espaça: a primeira entidade fica onde está (só "assenta" na grade); as demais vão
+  // para a direita dela (fileira horizontal, mesma altura) ou para baixo dela (fileira vertical,
+  // mesma coluna). O vão entre vizinhas leva em conta entidade + atributos + losango.
+  var snap = function(v){ return snapToGrid ? snapValue(v) : v; };
+  var first = ordered[0];
+  moveNodeWithAttributes(first, snap(first.x) - first.x, snap(first.y) - first.y);
+  var baseX = first.x, baseY = first.y;
+  for (var k = 1; k < ordered.length; k++){
+    var prev = ordered[k - 1], cur = ordered[k], relK = relBetween[k - 1];
+    if (vertical){
+      var relH = relK ? computeDims(relK).h : 60;
+      var targetY = snap(prev.y + verticalExtentWithAttributes(prev).after + CHAIN_GAP + relH + CHAIN_GAP + verticalExtentWithAttributes(cur).before);
+      moveNodeWithAttributes(cur, baseX - cur.x, targetY - cur.y);
+      if (relK){
+        var gapT = prev.y + verticalExtentWithAttributes(prev).after;
+        var gapB = cur.y - verticalExtentWithAttributes(cur).before;
+        moveNodeWithAttributes(relK, baseX - relK.x, (gapT + gapB) / 2 - relK.y);
+      }
+    } else {
+      var relW = relK ? computeDims(relK).w : 120;
+      var targetX = snap(prev.x + horizontalExtentWithAttributes(prev).right + CHAIN_GAP + relW + CHAIN_GAP + horizontalExtentWithAttributes(cur).left);
+      moveNodeWithAttributes(cur, targetX - cur.x, baseY - cur.y);
+      if (relK){
+        // losango no meio do vão livre entre as duas (bordas com atributos incluídos)
+        var gapL = prev.x + horizontalExtentWithAttributes(prev).right;
+        var gapR = cur.x - horizontalExtentWithAttributes(cur).left;
+        moveNodeWithAttributes(relK, (gapL + gapR) / 2 - relK.x, baseY - relK.y);
+      }
+    }
+  }
+  if (created.length){
+    selectedNodeIds = new Set(created);
+    selectedEdgeIds = new Set();
+  }
+  pendingAdd = null;
+  render();
+  var msg = created.length
+    ? created.length + (created.length === 1 ? " relacionamento criado" : " relacionamentos criados") + " ligando as entidades em sequência, " + (vertical ? "de cima para baixo" : "da esquerda para a direita") + ", alinhadas e espaçadas."
+    : "Nenhum relacionamento novo — as entidades selecionadas já estavam ligadas entre si; elas foram só alinhadas e espaçadas.";
+  if (created.length && skipped) msg += " " + skipped + (skipped === 1 ? " par já ligado foi mantido." : " pares já ligados foram mantidos.");
+  msg += created.length ? " Edite nomes e cardinalidades no painel." : "";
+  // Se a fileira passou da área visível, reenquadra o quadro para mostrar tudo.
+  var outOfView = ordered.concat(relBetween.filter(Boolean)).some(function(n){
+    var d = computeDims(n);
+    return n.x - d.w / 2 < view.x || n.x + d.w / 2 > view.x + view.w || n.y - d.h / 2 < view.y || n.y + d.h / 2 > view.y + view.h;
+  });
+  if (outOfView) fitToContent();
+  showToast(msg);
+}
+
+
+/* ---------- disposição do modelo inteiro (vertical / horizontal) ---------- */
+// Pedido do usuário: com TODOS os objetos selecionados, o menu do botão direito ganha
+// "Disposição vertical" (modelo inteiro numa coluna, atributos à direita) e "Disposição
+// horizontal" (modelo inteiro numa fileira, atributos acima). Como funciona:
+//  1. Ordem das entidades: percorre o grafo entidade–(relacionamento/generalização)–entidade em
+//     profundidade, começando pela entidade mais acima (vertical) ou mais à esquerda (horizontal)
+//     e preferindo sempre a vizinha mais próxima nesse sentido -- assim entidades ligadas entre si
+//     ficam lado a lado sempre que possível. Partes desconectadas vêm em seguida.
+//  2. As entidades vão para uma mesma coluna/fileira, espaçadas; quando duas vizinhas têm um
+//     relacionamento (ou generalização) só entre elas, ele fica no vão entre as duas.
+//  3. Os demais (entre entidades não vizinhas, com 3+ entidades, autorrelacionamento) ficam numa
+//     faixa ao lado -- à esquerda (vertical) ou abaixo (horizontal), o lado oposto ao dos
+//     atributos --, em "pistas" que não se sobrepõem.
+//  4. Atributos: à direita (vertical) / acima (horizontal); os de relacionamentos na faixa lateral
+//     vão para fora dela (esquerda / abaixo). Anotações não são movidas.
+function connectorMembers(conn){
+  var ids = [];
+  state.edges.forEach(function(e){
+    var other = e.from === conn.id ? e.to : (e.to === conn.id ? e.from : null);
+    if (!other) return;
+    if (conn.type === "relationship" && e.kind !== "participation") return;
+    var on = getNode(other);
+    if (on && on.type === "entity" && ids.indexOf(other) === -1) ids.push(other);
+  });
+  return ids;
+}
+function axisExtent(node, vertical){
+  if (vertical){ var v = verticalExtentWithAttributes(node); return { before: v.before, after: v.after }; }
+  var h = horizontalExtentWithAttributes(node); return { before: h.left, after: h.right };
+}
+function crossExtent(node, vertical){
+  if (vertical){ var h = horizontalExtentWithAttributes(node); return { before: h.left, after: h.right }; }
+  var v = verticalExtentWithAttributes(node); return { before: v.before, after: v.after };
+}
+function layoutWholeModel(vertical){
+  var entities = state.nodes.filter(function(n){ return n.type === "entity"; });
+  if (!entities.length){ showToast("Não há entidades para dispor.", "warn"); return; }
+  var connectors = state.nodes.filter(function(n){ return n.type === "relationship" || n.type === "generalization"; });
+  var membersOf = {};
+  connectors.forEach(function(c){ membersOf[c.id] = connectorMembers(c); });
+  var attrMode = vertical ? "right" : "top";
+  // 1) atributos para o lado escolhido (antes de medir as extensões)
+  entities.concat(connectors).forEach(function(n){
+    if (n.type !== "generalization" && connectedAttributesOf(n).length) alignEntityAttributes(n, attrMode);
+  });
+  // 2) ordem das entidades
+  var keyA = vertical ? function(n){ return n.y; } : function(n){ return n.x; };
+  var keyB = vertical ? function(n){ return n.x; } : function(n){ return n.y; };
+  var byPos = function(p, q){ return (keyA(p) - keyA(q)) || (keyB(p) - keyB(q)); };
+  var neighbors = {};
+  entities.forEach(function(e){ neighbors[e.id] = []; });
+  connectors.forEach(function(c){
+    var m = membersOf[c.id];
+    m.forEach(function(a){ m.forEach(function(b){ if (a !== b && neighbors[a] && neighbors[a].indexOf(b) === -1) neighbors[a].push(b); }); });
+  });
+  var visited = {}, ordered = [];
+  var remaining = entities.slice().sort(byPos);
+  function dfs(start){
+    var stack = [start];
+    while (stack.length){
+      var cur = stack.pop();
+      if (visited[cur.id]) continue;
+      visited[cur.id] = true;
+      ordered.push(cur);
+      var nb = neighbors[cur.id].map(getNode).filter(function(n){ return n && !visited[n.id]; }).sort(byPos).reverse();
+      nb.forEach(function(n){ stack.push(n); });
+    }
+  }
+  remaining.forEach(function(e){ if (!visited[e.id]) dfs(e); });
+  // 3) conector "do vão" entre cada par de vizinhas: liga exatamente as duas
+  var used = {}, gapConn = [];
+  for (var i = 0; i < ordered.length - 1; i++){
+    var a = ordered[i].id, b = ordered[i + 1].id, found = null;
+    for (var c = 0; c < connectors.length && !found; c++){
+      var m = membersOf[connectors[c].id];
+      if (!used[connectors[c].id] && m.length === 2 && m.indexOf(a) !== -1 && m.indexOf(b) !== -1) found = connectors[c];
+    }
+    if (found) used[found.id] = true;
+    gapConn.push(found);
+  }
+  // 4) posiciona as entidades
+  var snap = function(v){ return snapToGrid ? snapValue(v) : v; };
+  var setAxis = function(n, val){ if (vertical) moveNodeWithAttributes(n, 0, val - n.y); else moveNodeWithAttributes(n, val - n.x, 0); };
+  var setCross = function(n, val){ if (vertical) moveNodeWithAttributes(n, val - n.x, 0); else moveNodeWithAttributes(n, 0, val - n.y); };
+  var first = ordered[0];
+  var base = snap(vertical ? first.x : first.y);
+  setCross(first, base);
+  setAxis(first, snap(vertical ? first.y : first.x));
+  var PLAIN_GAP = 90;
+  for (var k = 1; k < ordered.length; k++){
+    var prev = ordered[k - 1], cur = ordered[k], gc = gapConn[k - 1];
+    var gapSize = PLAIN_GAP;
+    if (gc){ var ge = axisExtent(gc, vertical); gapSize = CHAIN_GAP + ge.before + ge.after + CHAIN_GAP; }
+    var prevPos = vertical ? prev.y : prev.x;
+    var target = snap(prevPos + axisExtent(prev, vertical).after + gapSize + axisExtent(cur, vertical).before);
+    setCross(cur, base);
+    setAxis(cur, target);
+    if (gc){
+      var gStart = prevPos + axisExtent(prev, vertical).after + CHAIN_GAP;
+      setCross(gc, base);
+      setAxis(gc, gStart + axisExtent(gc, vertical).before);
+    }
+  }
+  // 5) faixa lateral para os demais conectores
+  var sideSign = vertical ? -1 : 1; // vertical: à esquerda (-x); horizontal: abaixo (+y)
+  var colEdge = null; // borda da coluna/fileira (com atributos) do lado da faixa lateral
+  ordered.forEach(function(e){
+    var ce = crossExtent(e, vertical);
+    var edgePos = (vertical ? e.x : e.y) + (sideSign < 0 ? -ce.before : ce.after);
+    colEdge = colEdge === null ? edgePos : (sideSign < 0 ? Math.min(colEdge, edgePos) : Math.max(colEdge, edgePos));
+  });
+  var lanes = []; // cada pista: lista de intervalos [ini, fim] no eixo principal
+  var LANE_STEP = vertical ? 190 : 140, LANE_START = vertical ? 130 : 110;
+  connectors.filter(function(c){ return !used[c.id]; }).forEach(function(c){
+    var m = membersOf[c.id].map(getNode).filter(Boolean);
+    var dims = computeDims(c);
+    var center;
+    if (m.length){
+      center = m.reduce(function(acc, n){ return acc + (vertical ? n.y : n.x); }, 0) / m.length;
+      if (m.length === 1){
+        // autorrelacionamento: desloca no eixo para as duas ligações em "L" aparecerem
+        var de = computeDims(m[0]);
+        center -= Math.max(vertical ? de.h : de.w, vertical ? dims.h : dims.w) / 2 + 45;
+      }
+    } else {
+      center = vertical ? c.y : c.x;
+    }
+    var half = (vertical ? dims.h : dims.w) / 2 + 20;
+    var lo = center - half, hi = center + half;
+    if (m.length > 1){
+      var poss = m.map(function(n){ return vertical ? n.y : n.x; });
+      lo = Math.min(lo, Math.min.apply(null, poss)); hi = Math.max(hi, Math.max.apply(null, poss));
+    }
+    var lane = 0;
+    while (lanes[lane] && lanes[lane].some(function(iv){ return lo < iv[1] && hi > iv[0]; })) lane++;
+    (lanes[lane] = lanes[lane] || []).push([lo, hi]);
+    var crossPos = colEdge + sideSign * (LANE_START + lane * LANE_STEP);
+    setCross(c, snap(crossPos));
+    setAxis(c, snap(center));
+    if (c.type !== "generalization" && connectedAttributesOf(c).length) alignEntityAttributes(c, vertical ? "left" : "bottom");
+  });
+  pendingAdd = null;
+  render();
+  fitToContent();
+  showToast((vertical ? "Disposição vertical aplicada: entidades em coluna, atributos à direita." : "Disposição horizontal aplicada: entidades em fileira, atributos acima.") + " Ctrl+Z desfaz.");
+}
+
 function selfRelationshipPosition(entity, relDims){
   var de = computeDims(entity);
   var dr = relDims || { w:130, h:64 };
@@ -3757,7 +4079,7 @@ function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey
   selectedEdgeIds = new Set();
   if (stickyAdd) pendingAdd = stickyAdd;
   render();
-  showToast('Atributo criado e conectado a "' + (target.name || "") + '".');
+  if (!bulkAddQuiet) showToast('Atributo criado e conectado a "' + (target.name || "") + '".');
 }
 
 // ---------- organizar atributos de uma entidade (menu de contexto do botão direito) ----------
@@ -3974,7 +4296,13 @@ function applyAttributeAlignCycleShortcut(node){
 // arranjos acima. Segue o mesmo padrão visual de askChoice3/askConfirm (modal-backdrop criado na
 // hora e removido ao final), mas com as opções em lista vertical (como o menu "Projeto") em vez de
 // botões lado a lado, já que os rótulos aqui são mais longos.
-function showAttributeAlignMenu(entity){
+// "entity" pode ser um nó só ou uma LISTA de nós (seleção múltipla) -- nesse caso o arranjo
+// escolhido é aplicado a cada um deles.
+function showAttributeAlignMenu(entity, opts){
+  opts = opts || {};
+  var targets = Array.isArray(entity) ? entity : [entity];
+  entity = targets[0];
+  var isGroup = targets.length > 1;
   var backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   // Ícone "linha com uma pilha de itens de um lado dela" -- a linha mais grossa representa a borda
@@ -3997,16 +4325,30 @@ function showAttributeAlignMenu(entity){
   }
   // Texto das descrições: concorda em gênero/artigo com o tipo do nó, já que este menu agora
   // também abre para relacionamentos ("do relacionamento"), não só entidades ("da entidade").
-  var doNo = entity.type === "relationship" ? "do relacionamento" : "da entidade";
+  var allRel = targets.every(function(n){ return n.type === "relationship"; });
+  var allEnt = targets.every(function(n){ return n.type === "entity"; });
+  var doNo = isGroup
+    ? (allEnt ? "de cada entidade" : allRel ? "de cada relacionamento" : "de cada elemento")
+    : (entity.type === "relationship" ? "do relacionamento" : "da entidade");
+  var introTxt = isGroup
+    ? "Escolha como os atributos d" + (allEnt ? "as " + targets.length + " entidades selecionadas" : allRel ? "os " + targets.length + " relacionamentos selecionados" : "os " + targets.length + " elementos selecionados") + " devem ficar dispostos no diagrama — o mesmo arranjo vale para todos."
+    : 'Escolha como os atributos de "' + (entity.name || "") + '" devem ficar dispostos no diagrama.';
   backdrop.innerHTML =
-    '<div class="modal-box">' +
+    '<div class="modal-box align-menu-box">' +
       '<h2>Organizar atributos</h2>' +
-      '<p>Escolha como os atributos de "' + escapeHtml(entity.name || "") + '" devem ficar dispostos no diagrama.</p>' +
+      '<p>' + escapeHtml(introTxt) + '</p>' +
       '<div class="dl-menu-panel">' +
         itemHtml("left", "Alinhar à esquerda", "Um abaixo do outro, alinhados à esquerda, do lado esquerdo " + doNo + ".", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.left + '</svg>') +
         itemHtml("right", "Alinhar à direita", "Um abaixo do outro, alinhados à direita, do lado direito " + doNo + ".", '<svg viewBox="0 0 16 12" fill="none" stroke-width="1.6" stroke-linecap="round">' + ALIGN_ICONS.right + '</svg>') +
         itemHtml("top", "Alinhar acima", "Um abaixo do outro, centralizados, acima " + doNo + ".", topIcon) +
         itemHtml("bottom", "Alinhar abaixo", "Um abaixo do outro, centralizados, abaixo " + doNo + ".", bottomIcon) +
+        (opts.layoutOptions
+          ? '<hr class="dl-menu-divider">' +
+            itemHtml("layout-v", "Disposição vertical", "Todo o modelo em uma coluna, com os relacionamentos entre as entidades e os atributos à direita.",
+              '<svg viewBox="0 0 16 16" fill="none" stroke-width="1.5"><rect x="5" y="1" width="6" height="3.4" rx=".6"/><path d="M8 4.4v2"/><path d="M8 6.4l2.2 1.6L8 9.6 5.8 8z"/><path d="M8 9.6v2"/><rect x="5" y="11.6" width="6" height="3.4" rx=".6"/></svg>') +
+            itemHtml("layout-h", "Disposição horizontal", "Todo o modelo em uma fileira, com os relacionamentos entre as entidades e os atributos acima.",
+              '<svg viewBox="0 0 16 16" fill="none" stroke-width="1.5"><rect x="1" y="6.3" width="3.4" height="3.4" rx=".6"/><path d="M4.4 8h1.8"/><path d="M6.2 8L8 6.3 9.8 8 8 9.7z"/><path d="M9.8 8h1.8"/><rect x="11.6" y="6.3" width="3.4" height="3.4" rx=".6"/></svg>')
+          : '') +
       '</div>' +
       '<div class="modal-actions"><button data-a="cancel">Cancelar</button></div>' +
     '</div>';
@@ -4014,10 +4356,18 @@ function showAttributeAlignMenu(entity){
   function cleanup(){ backdrop.remove(); }
   backdrop.addEventListener("click", function(e){ if (e.target === backdrop) cleanup(); });
   backdrop.querySelector('[data-a="cancel"]').addEventListener("click", cleanup);
+  if (opts.layoutOptions){
+    ["layout-v", "layout-h"].forEach(function(key){
+      backdrop.querySelector('[data-a="' + key + '"]').addEventListener("click", function(){
+        cleanup();
+        layoutWholeModel(key === "layout-v");
+      });
+    });
+  }
   ["left", "right", "top", "bottom"].forEach(function(key){
     backdrop.querySelector('[data-a="' + key + '"]').addEventListener("click", function(){
       cleanup();
-      alignEntityAttributes(entity, key);
+      targets.forEach(function(t){ alignEntityAttributes(t, key); });
       render();
       // Pedido do usuário: sem o toast "Atributos organizados." -- o reposicionamento já aparece
       // sozinho no quadro (ver applyAttributeAlignShortcut, mesmo pedido aplicado ao atalho).
@@ -4207,12 +4557,32 @@ document.querySelectorAll(".tbtn[data-add]").forEach(function(btn){
     // selecionado (só entidade ou relacionamento), senão cada atributo criado ficaria selecionado
     // e o próximo clique o encadearia como sub-atributo dele, em vez de criar outro atributo do
     // mesmo alvo original.
+    // Relacionamento com 2+ entidades selecionadas: liga as entidades em sequência (ver
+    // linkSelectedEntitiesInChain). Sem essa seleção, o botão segue posicionando um losango solto.
+    if (type === "relationship" && !identifying){
+      var selEntities = Array.from(selectedNodeIds).map(getNode).filter(function(n){ return n && n.type === "entity"; });
+      if (selEntities.length >= 2){
+        linkSelectedEntitiesInChain(selEntities);
+        return;
+      }
+    }
     // Autorrelacionamento: com uma entidade selecionada, o clique no botão já cria o losango e as
     // duas ligações na hora (mesma ideia do atributo logo abaixo).
     if (type === "selfrel" && selectedNodeIds.size === 1){
       var selEnt = getNode(Array.from(selectedNodeIds)[0]);
       if (selEnt && selEnt.type === "entity"){
         placeSelfRelationshipOnEntity(selEnt);
+        return;
+      }
+    }
+    // Pedido do usuário: clique ESQUERDO em Simples/Identificador com VÁRIAS entidades ou
+    // relacionamentos selecionados -> cada um recebe um atributo (o mesmo caminho do botão
+    // direito, só que com quantidade 1 e sem perguntar -- inclusive o lado dos atributos conforme
+    // a disposição dos objetos, ver bulkAddFromToolbarButton).
+    if (type === "attribute" && selectedNodeIds.size >= 2){
+      var attrTargets = Array.from(selectedNodeIds).map(getNode).filter(function(n){ return n && (n.type === "entity" || n.type === "relationship"); });
+      if (attrTargets.length >= 2){
+        bulkAddFromToolbarButton(btn, 1);
         return;
       }
     }
@@ -4287,24 +4657,126 @@ function uniqueColumnName(table, base){
   return name;
 }
 
-document.getElementById("btnAddColumn").addEventListener("click", function(){
-  var t = getSingleSelectedTable();
-  if (!t){ showToast("Selecione uma tabela para adicionar um campo.", "warn"); return; }
+// Um campo comum / uma chave primária numa tabela -- usado pelo clique normal nos botões
+// "Campo"/"Chave primária" (tabela única selecionada) e pelo botão direito neles (vários de uma
+// vez em todas as tabelas selecionadas, ver bulkAddFromToolbarButton).
+function addPlainColumnTo(t){
   t.columns = t.columns || [];
   // "50" é o valor de fallback de sempre, usado só quando VARCHAR não tem um "Tam. padrão"
   // cadastrado em "Gerenciar tipos" (ver getTypeDefaultParams) -- com um cadastrado, ele vence.
   var varcharDefaults = getTypeDefaultParams("VARCHAR");
   t.columns.push({ name: uniqueColumnName(t, "campo"), dataType:"VARCHAR", dataSize: varcharDefaults.dataSize || "50", dataDecimals: varcharDefaults.dataDecimals || "", pk:false, fk:false, fkTable:null, fkColumn:null });
+}
+function addPkColumnTo(t){
+  t.columns = t.columns || [];
+  var intDefaults = getTypeDefaultParams("INT");
+  t.columns.push({ name: uniqueColumnName(t, "chave_primaria"), dataType:"INT", dataSize: intDefaults.dataSize || "", dataDecimals: intDefaults.dataDecimals || "", pk:true, fk:false, fkTable:null, fkColumn:null });
+}
+
+document.getElementById("btnAddColumn").addEventListener("click", function(){
+  // Várias tabelas selecionadas: cada uma recebe uma coluna (mesmo caminho do botão direito).
+  if (Array.from(selectedNodeIds).map(getNode).filter(function(n){ return n && n.type === "table"; }).length >= 2){
+    bulkAddFromToolbarButton(this, 1);
+    return;
+  }
+  var t = getSingleSelectedTable();
+  if (!t){ showToast("Selecione uma tabela para adicionar um campo.", "warn"); return; }
+  addPlainColumnTo(t);
   render();
 });
 
 document.getElementById("btnAddPkColumn").addEventListener("click", function(){
+  // Várias tabelas selecionadas: cada uma recebe uma coluna (mesmo caminho do botão direito).
+  if (Array.from(selectedNodeIds).map(getNode).filter(function(n){ return n && n.type === "table"; }).length >= 2){
+    bulkAddFromToolbarButton(this, 1);
+    return;
+  }
   var t = getSingleSelectedTable();
   if (!t){ showToast("Selecione uma tabela para adicionar uma coluna de chave primária.", "warn"); return; }
-  t.columns = t.columns || [];
-  var intDefaults = getTypeDefaultParams("INT");
-  t.columns.push({ name: uniqueColumnName(t, "chave_primaria"), dataType:"INT", dataSize: intDefaults.dataSize || "", dataDecimals: intDefaults.dataDecimals || "", pk:true, fk:false, fkTable:null, fkColumn:null });
+  addPkColumnTo(t);
   render();
+});
+
+/* ---------- botão direito nos botões da barra: adicionar vários de uma vez ---------- */
+// Pedido do usuário: com objetos selecionados no quadro, o botão direito sobre um botão da barra
+// esquerda pergunta QUANTOS daquele elemento adicionar e inclui essa quantidade em CADA objeto
+// selecionado. Vale para os botões que adicionam algo "dentro de" um objeto existente:
+//   - Simples / Identificador (conceitual): atributos ligados a cada entidade ou relacionamento
+//     selecionado (mesmo posicionamento/alinhamento de placeAttributeOnNode);
+//   - Campo / Chave primária (lógico): colunas em cada tabela selecionada.
+// Chave estrangeira fica de fora (precisa escolher a tabela referenciada, uma a uma). Nos demais
+// botões (Entidade, Relacionamento...) o botão direito só explica onde a opção funciona.
+var BULK_ADD_MAX = 30;
+var bulkAddQuiet = false; // durante a inclusão em lote, cala o aviso de cada atributo (fica só o resumo no final)
+async function bulkAddFromToolbarButton(btn, fixedQty){
+  var addType = btn.getAttribute("data-add");
+  var spec = null;
+  if (addType === "attribute"){
+    var isKey = btn.getAttribute("data-key") === "1";
+    spec = {
+      what: isKey ? "atributos identificadores" : "atributos simples",
+      targetsLabel: "entidades ou relacionamentos",
+      accepts: function(n){ return n.type === "entity" || n.type === "relationship"; },
+      add: function(n){ placeAttributeOnNode(n, btn.getAttribute("data-kind") || "simple", null, true, isKey); }
+    };
+  } else if (btn.id === "btnAddColumn" || btn.id === "btnAddPkColumn"){
+    var isPk = btn.id === "btnAddPkColumn";
+    spec = {
+      what: isPk ? "colunas de chave primária" : "campos",
+      targetsLabel: "tabelas",
+      accepts: function(n){ return n.type === "table"; },
+      add: function(n){ if (isPk) addPkColumnTo(n); else addPlainColumnTo(n); }
+    };
+  }
+  if (!spec){
+    showToast("O botão direito adiciona vários de uma vez só em Simples e Identificador (modelo conceitual) ou em Campo e Chave primária (modelo lógico).", "warn");
+    return;
+  }
+  var targets = Array.from(selectedNodeIds).map(getNode).filter(function(n){ return n && spec.accepts(n); });
+  if (!targets.length){
+    showToast("Selecione no quadro uma ou mais " + spec.targetsLabel + " e clique de novo com o botão direito para adicionar " + spec.what + ".", "warn");
+    return;
+  }
+  // fixedQty: clique ESQUERDO com vários objetos selecionados (ver mais abaixo) -- adiciona direto
+  // essa quantidade (1), sem perguntar.
+  var qtd = fixedQty || await askNumberPrompt(
+    "Adicionar " + spec.what,
+    "Quantos " + spec.what + " adicionar a " + (targets.length === 1 ? 'cada um dos objetos selecionados ("' + (targets[0].name || "") + '")' : "cada um dos " + targets.length + " objetos selecionados") + "?",
+    1, 1, BULK_ADD_MAX, "Quantidade por objeto", "Adicionar");
+  if (!qtd) return;
+  // Pedido do usuário: com 2+ objetos selecionados recebendo ATRIBUTOS, o lado dos atributos
+  // segue a disposição deles no quadro -- mais espalhados na vertical (coluna) -> atributos à
+  // DIREITA; mais espalhados na horizontal (fileira) -> atributos ACIMA. Assim os atributos não
+  // ficam no caminho das linhas entre os objetos (mesmo critério de linkSelectedEntitiesInChain).
+  // Com um objeto só, continua o arranjo que ele já tinha.
+  if (addType === "attribute" && targets.length >= 2){
+    var txs = targets.map(function(n){ return n.x; }), tys = targets.map(function(n){ return n.y; });
+    var inColumn = (Math.max.apply(null, tys) - Math.min.apply(null, tys)) > (Math.max.apply(null, txs) - Math.min.apply(null, txs));
+    var sideMode = inColumn ? "right" : "top";
+    targets.forEach(function(n){
+      if (connectedAttributesOf(n).length) alignEntityAttributes(n, sideMode); // reorganiza os que já existiam
+      else n.attrAlignMode = sideMode;                                           // os novos já nascem desse lado
+    });
+  }
+  bulkAddQuiet = true;
+  try {
+    targets.forEach(function(n){
+      if (!getNode(n.id)) return;
+      for (var k = 0; k < qtd; k++) spec.add(n);
+    });
+  } finally { bulkAddQuiet = false; }
+  // Mantém a seleção original (placeAttributeOnNode mexe nela a cada atributo criado).
+  selectedNodeIds = new Set(targets.map(function(n){ return n.id; }));
+  selectedEdgeIds = new Set();
+  render();
+  var total = qtd * targets.length;
+  showToast(total + " " + spec.what + " adicionados (" + qtd + " em cada um de " + targets.length + (targets.length === 1 ? " objeto)." : " objetos)."));
+}
+document.querySelectorAll("#toolbarConceptual .tbtn[data-add], #toolbarLogical .tbtn").forEach(function(btn){
+  btn.addEventListener("contextmenu", function(e){
+    e.preventDefault();
+    bulkAddFromToolbarButton(btn);
+  });
 });
 
 document.getElementById("btnAddFkColumn").addEventListener("click", function(){
@@ -6980,10 +7452,22 @@ var SHORTCUT_HELP = [
     [["Shift + clique"], "Adiciona ou remove um elemento da seleção."],
     [["Alt + soltar/arrastar"], "Posiciona ou move sem encaixar na grade."],
     [["Ctrl + clique no botão"], "Nos botões da barra (inclusive Conectar): deixa a ferramenta fixa para usar várias vezes seguidas; clique de novo para desligar."],
+    [["Botão direito no botão"], "Em Simples/Identificador (ou Campo/Chave primária no modelo lógico), com objetos selecionados no quadro: pergunta quantos adicionar e inclui essa quantidade em cada objeto selecionado (o clique normal, com vários selecionados, inclui um em cada)."],
     [["Duplo clique na borda"], "Na borda direita da barra esquerda: volta à largura padrão."]
   ]}
 ];
 var shortcutsHelpBackdrop = null;
+var HELP_SIZE_KEY = "estudioDER.helpSize.v1"; // { w, h } em px -- tamanho da janela de atalhos ajustado pelo usuário
+function loadHelpSize(){
+  try {
+    var v = JSON.parse(localStorage.getItem(HELP_SIZE_KEY) || "null");
+    if (v && v.w > 0 && v.h > 0) return v;
+  } catch (err){}
+  return null;
+}
+function saveHelpSize(w, h){
+  try { localStorage.setItem(HELP_SIZE_KEY, JSON.stringify({ w: Math.round(w), h: Math.round(h) })); } catch (err){}
+}
 function closeShortcutsHelp(){
   if (shortcutsHelpBackdrop){ shortcutsHelpBackdrop.remove(); shortcutsHelpBackdrop = null; }
 }
@@ -7002,7 +7486,7 @@ function keysHtml(keys){
 function showShortcutsHelp(){
   if (shortcutsHelpBackdrop){ closeShortcutsHelp(); return; }
   var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-  var html = '<div class="modal-box help-box" role="dialog" aria-modal="true" aria-labelledby="helpTitle">' +
+  var html = '<div class="modal-box help-box" role="dialog" aria-modal="true" aria-labelledby="helpTitle"><div class="help-scroll">' +
     '<h2 id="helpTitle">Teclas de atalho</h2>' +
     '<p>Os atalhos de teclado não funcionam enquanto o cursor está num campo de texto (exceto F1 e Esc).' +
     (isMac ? ' No Mac, use <kbd>Cmd</kbd> no lugar de <kbd>Ctrl</kbd>.' : ' No Mac, use Cmd no lugar de Ctrl.') + '</p>';
@@ -7013,17 +7497,57 @@ function showShortcutsHelp(){
     });
     html += '</div>';
   });
-  html += '<div class="modal-actions"><button data-a="close" class="primary">Fechar</button></div></div>';
+  html += '</div><div class="modal-actions"><button data-a="close" class="primary">Fechar</button></div>' +
+    '<div class="help-resize" title="Arraste para redimensionar (duplo clique volta ao tamanho padrão)"></div></div>';
   var backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = html;
   document.body.appendChild(backdrop);
   shortcutsHelpBackdrop = backdrop;
-  backdrop.addEventListener("click", function(e){ if (e.target === backdrop) closeShortcutsHelp(); });
+  // Fecha clicando no fundo escurecido -- mas só se o clique COMEÇOU no fundo: soltar o mouse
+  // fora da janela depois de redimensioná-la gera um "click" no fundo e não deve fechá-la.
+  var pressStartedOnBackdrop = false;
+  backdrop.addEventListener("pointerdown", function(e){ pressStartedOnBackdrop = e.target === backdrop; });
+  backdrop.addEventListener("click", function(e){ if (e.target === backdrop && pressStartedOnBackdrop) closeShortcutsHelp(); });
   var closeBtn = backdrop.querySelector('[data-a="close"]');
   closeBtn.addEventListener("click", closeShortcutsHelp);
   closeBtn.focus({ preventScroll: true });
-  backdrop.querySelector(".help-box").scrollTop = 0;
+  var box = backdrop.querySelector(".help-box");
+  backdrop.querySelector(".help-scroll").scrollTop = 0;
+  // Tamanho salvo: aplicado como largura/altura explícitas (os limites do CSS -- min/max --
+  // continuam valendo, então uma janela salva numa tela maior se ajusta à tela atual).
+  var saved = loadHelpSize();
+  if (saved){ box.style.width = saved.w + "px"; box.style.height = saved.h + "px"; }
+  // Alça no canto inferior direito: arrastar muda largura/altura. Como a janela fica centralizada
+  // na tela, ela cresce para os dois lados -- por isso a variação é o DOBRO do deslocamento do
+  // mouse, mantendo o canto embaixo do cursor. Ao soltar, o tamanho é gravado; duplo clique
+  // volta ao tamanho padrão (definido no CSS) e apaga o salvo.
+  var handle = backdrop.querySelector(".help-resize");
+  handle.addEventListener("pointerdown", function(e){
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var startX = e.clientX, startY = e.clientY, startW = box.offsetWidth, startH = box.offsetHeight, pid = e.pointerId;
+    function onMove(ev){
+      if (ev.pointerId !== pid) return;
+      box.style.width = (startW + 2 * (ev.clientX - startX)) + "px";
+      box.style.height = (startH + 2 * (ev.clientY - startY)) + "px";
+    }
+    function onUp(ev){
+      if (ev.pointerId !== pid) return;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      saveHelpSize(box.offsetWidth, box.offsetHeight); // já limitado pelos min/max do CSS
+    }
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  });
+  handle.addEventListener("dblclick", function(){
+    box.style.width = ""; box.style.height = "";
+    try { localStorage.removeItem(HELP_SIZE_KEY); } catch (err){}
+  });
 }
 // Fase de captura: F1 funciona de qualquer lugar (inclusive dentro de um campo) e não abre a
 // ajuda do próprio navegador; com a ajuda aberta, Esc só fecha a ajuda (não chega aos outros
