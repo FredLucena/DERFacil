@@ -198,6 +198,11 @@
     font-family:var(--font-mono); font-size:11px; color:var(--ink-soft);
   }
   .mode-menu-item.active .mode-menu-item-shortcut{ color:var(--accent-ink); }
+  /* Atalho exibido à direita das opções dos menus de contexto (ex.: "Organizar atributos"). */
+  .dl-menu-item span.ctx-shortcut{
+    flex:0 0 auto; margin-left:auto; align-self:flex-start; padding-left:14px; margin-top:1px;
+    font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); white-space:nowrap;
+  }
 
   main{ flex:1; display:flex; min-height:0; }
 
@@ -1039,7 +1044,7 @@
     <div class="zoom-ctl" id="zoomCtl">
       <button id="zoomIn" title="Aproximar">+</button>
       <button id="zoomOut" title="Afastar">−</button>
-      <button id="zoomFit" title="Ajustar à tela">⤢</button>
+      <button id="zoomFit" title="Ajustar à tela (Ctrl+AJ)">⤢</button>
     </div>
     <!-- Pedido do usuário: ao escolher "Modelo Físico" no seletor do topo, gera o código SQL a
          partir das definições do Modelo Lógico (tabelas, colunas, tipos, PK/FK e restrições por
@@ -2534,11 +2539,22 @@ function restoreSavedView(){
   } catch (err){ return false; }
 }
 window.addEventListener("pagehide", saveViewNow);
-function screenToSvg(clientX, clientY){
+// O SVG encaixa o viewBox no quadro mantendo a proporção ("meet"): se a proporção do quadro
+// diferir da do viewBox (ex.: depois de redimensionar a janela ou as barras laterais), a área
+// visível fica centralizada com folga numa direção. A conversão tela <-> SVG precisa usar essa
+// escala única e o deslocamento do centramento, senão o laço/arraste ficam desalinhados do mouse
+// (só "consertava" ao ajustar a tela, que refaz o viewBox com a proporção do quadro).
+function stageScale(){
   var r = stageEl.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0)) return { r: r, sc: 1, ox: 0, oy: 0 };
+  var sc = Math.min(r.width / view.w, r.height / view.h);
+  return { r: r, sc: sc, ox: (r.width - view.w * sc) / 2, oy: (r.height - view.h * sc) / 2 };
+}
+function screenToSvg(clientX, clientY){
+  var m = stageScale();
   return {
-    x: view.x + (clientX - r.left) / r.width * view.w,
-    y: view.y + (clientY - r.top) / r.height * view.h
+    x: view.x + (clientX - m.r.left - m.ox) / m.sc,
+    y: view.y + (clientY - m.r.top - m.oy) / m.sc
   };
 }
 function zoomBy(factor, cx, cy){
@@ -3190,9 +3206,8 @@ function attachNoteResizeHandlers(handleEl, node){
     function onMove(ev){
       if (ev.pointerId !== pointerId) return;
       var dx = ev.clientX - startClient.x, dy = ev.clientY - startClient.y;
-      var r = stageEl.getBoundingClientRect();
-      var svgDx = dx * (view.w / r.width);
-      var svgDy = dy * (view.h / r.height);
+      var svgDx = dx / stageScale().sc;
+      var svgDy = dy / stageScale().sc;
       var newW = clamp(startW + svgDx, NOTE_MIN_W, NOTE_MAX_W);
       var newH = clamp(startH + svgDy, NOTE_MIN_H, NOTE_MAX_H);
       node.noteW = newW;
@@ -3296,9 +3311,8 @@ function attachNodeHandlers(g, node){
       var dx = ev.clientX - startClient.x, dy = ev.clientY - startClient.y;
       if (!moved && Math.hypot(dx,dy) > 4) moved = true;
       if (moved && !connectMode){
-        var r = stageEl.getBoundingClientRect();
-        var svgDx = dx * (view.w / r.width);
-        var svgDy = dy * (view.h / r.height);
+        var svgDx = dx / stageScale().sc;
+        var svgDy = dy / stageScale().sc;
         // Encaixa na grade pela posição do nó "âncora" (o que foi clicado) e aplica o mesmo
         // deslocamento (já encaixado) a todo o grupo, preservando as posições relativas entre
         // os elementos selecionados. Segurar Alt desativa o encaixe temporariamente.
@@ -3377,6 +3391,14 @@ function attachNodeHandlers(g, node){
       selectedNodeIds = new Set([node.id]);
       selectedEdgeIds = new Set();
       render();
+      // Botão direito sobre UMA entidade: janela para criar várias entidades a partir dela
+      // (quantidade, com/sem relacionamentos, vertical/horizontal). O alinhamento de atributos
+      // continua pelos atalhos Ctrl+AE/AD/AC/AB, pelo menu com vários selecionados e pelos
+      // relacionamentos.
+      if (node.type === "entity"){
+        askCreateEntities(node);
+        return;
+      }
       var attrs = connectedAttributesOf(node);
       if (!attrs.length){
         showToast(noAttrsToOrganizeMsg(node), "warn");
@@ -3804,15 +3826,19 @@ function verticalExtentWithAttributes(node){
 // estão mais espalhadas na horizontal (diferença de X maior que a de Y) e VERTICAL quando estão
 // mais espalhadas na vertical. Na vertical, a ordem é de cima para baixo e todas ficam na
 // coluna (X) da entidade mais acima.
-function linkSelectedEntitiesInChain(entities){
+function linkSelectedEntitiesInChain(entities, opts){
+  opts = opts || {};
+  var noRel = !!opts.noRelationships;
   var xs = entities.map(function(n){ return n.x; }), ys = entities.map(function(n){ return n.y; });
-  var vertical = (Math.max.apply(null, ys) - Math.min.apply(null, ys)) > (Math.max.apply(null, xs) - Math.min.apply(null, xs));
+  var vertical = (typeof opts.vertical === "boolean") ? opts.vertical
+    : (Math.max.apply(null, ys) - Math.min.apply(null, ys)) > (Math.max.apply(null, xs) - Math.min.apply(null, xs));
   var ordered = entities.slice().sort(vertical
     ? function(p, q){ return (p.y - q.y) || (p.x - q.x); }
     : function(p, q){ return (p.x - q.x) || (p.y - q.y); });
   var created = [], skipped = 0, relBetween = [];
   for (var i = 0; i < ordered.length - 1; i++){
     var a = ordered[i], b = ordered[i + 1];
+    if (noRel){ relBetween.push(null); continue; }
     if (entitiesAlreadyRelated(a, b)){ skipped++; relBetween.push(binaryRelationshipBetween(a, b)); continue; }
     var rel = addNodeAt("relationship", {}, (a.x + b.x) / 2, (a.y + b.y) / 2);
     state.edges.push({ id: uid("ed"), from:a.id, to:rel.id, kind:"participation", min:"1", max:"N", role:"" });
@@ -3840,7 +3866,7 @@ function linkSelectedEntitiesInChain(entities){
     var prev = ordered[k - 1], cur = ordered[k], relK = relBetween[k - 1];
     if (vertical){
       var relH = relK ? computeDims(relK).h : 60;
-      var targetY = snap(prev.y + verticalExtentWithAttributes(prev).after + CHAIN_GAP + relH + CHAIN_GAP + verticalExtentWithAttributes(cur).before);
+      var targetY = snap(prev.y + verticalExtentWithAttributes(prev).after + CHAIN_GAP + (noRel ? 0 : relH + CHAIN_GAP) + verticalExtentWithAttributes(cur).before);
       moveNodeWithAttributes(cur, baseX - cur.x, targetY - cur.y);
       if (relK){
         var gapT = prev.y + verticalExtentWithAttributes(prev).after;
@@ -3849,7 +3875,7 @@ function linkSelectedEntitiesInChain(entities){
       }
     } else {
       var relW = relK ? computeDims(relK).w : 120;
-      var targetX = snap(prev.x + horizontalExtentWithAttributes(prev).right + CHAIN_GAP + relW + CHAIN_GAP + horizontalExtentWithAttributes(cur).left);
+      var targetX = snap(prev.x + horizontalExtentWithAttributes(prev).right + CHAIN_GAP + (noRel ? 0 : relW + CHAIN_GAP) + horizontalExtentWithAttributes(cur).left);
       moveNodeWithAttributes(cur, targetX - cur.x, baseY - cur.y);
       if (relK){
         // losango no meio do vão livre entre as duas (bordas com atributos incluídos)
@@ -3859,13 +3885,18 @@ function linkSelectedEntitiesInChain(entities){
       }
     }
   }
-  if (created.length){
+  if (opts.selectIds){
+    selectedNodeIds = new Set(opts.selectIds.concat(created));
+    selectedEdgeIds = new Set();
+  } else if (created.length){
     selectedNodeIds = new Set(created);
     selectedEdgeIds = new Set();
   }
   pendingAdd = null;
   render();
-  var msg = created.length
+  var msg = noRel
+    ? ordered.length + " entidades alinhadas e espaçadas " + (vertical ? "na vertical." : "na horizontal.")
+    : created.length
     ? created.length + (created.length === 1 ? " relacionamento criado" : " relacionamentos criados") + " ligando as entidades em sequência, " + (vertical ? "de cima para baixo" : "da esquerda para a direita") + ", alinhadas e espaçadas."
     : "Nenhum relacionamento novo — as entidades selecionadas já estavam ligadas entre si; elas foram só alinhadas e espaçadas.";
   if (created.length && skipped) msg += " " + skipped + (skipped === 1 ? " par já ligado foi mantido." : " pares já ligados foram mantidos.");
@@ -3879,6 +3910,69 @@ function linkSelectedEntitiesInChain(entities){
   showToast(msg);
 }
 
+
+// Janela do botão direito sobre uma entidade: cria N novas entidades a partir dela, em fileira
+// vertical (para baixo) ou horizontal (para a direita), com ou sem relacionamentos entre elas.
+function askCreateEntities(node){
+  var backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-box">' +
+      '<h2>Criar entidades</h2>' +
+      '<p>' + (node ? 'Novas entidades a partir de "' + escapeHtml(node.name || "") + '".' : 'Entidades novas, no centro da área visível do quadro.') + '</p>' +
+      '<div class="field"><label for="ceQty">Quantidade de entidades</label>' +
+        '<input type="number" id="ceQty" min="1" max="30" step="1" value="2"></div>' +
+      '<div class="field"><label for="ceRel">Relacionamentos</label>' +
+        '<select id="ceRel"><option value="no" selected>Sem relacionamentos</option><option value="yes">Com relacionamentos</option></select></div>' +
+      '<div class="field"><label for="ceDir">Disposição</label>' +
+        '<select id="ceDir"><option value="v" selected>Vertical</option><option value="h">Horizontal</option></select></div>' +
+      '<div class="modal-actions">' +
+        '<button data-a="cancel">Cancelar</button>' +
+        '<button data-a="ok" class="primary">Criar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  var qty = backdrop.querySelector("#ceQty");
+  function cleanup(){ backdrop.remove(); }
+  function submit(){
+    var n = Math.round(Number(qty.value));
+    if (!isFinite(n)) n = 2;
+    n = clamp(n, 1, 30);
+    var withRel = backdrop.querySelector("#ceRel").value === "yes";
+    var vertical = backdrop.querySelector("#ceDir").value === "v";
+    cleanup();
+    var made = [];
+    // Sem entidade de partida (botão direito no botão "Entidade" da barra): todas são novas e a
+    // primeira nasce no centro da área visível.
+    var bx = node ? node.x : view.x + view.w / 2, by = node ? node.y : view.y + view.h / 2;
+    if (!node && state.nodes.length){
+      // Já há objetos no quadro: começa abaixo de todos, alinhado à esquerda do conteúdo, para não sobrepor.
+      var minXe = Infinity, maxYe = -Infinity;
+      state.nodes.forEach(function(o){ var d = computeDims(o); minXe = Math.min(minXe, centerX(o, d)); maxYe = Math.max(maxYe, o.y + d.h / 2); });
+      bx = minXe; by = maxYe + 140;
+    }
+    for (var i = node ? 1 : 0; i <= (node ? n : n - 1); i++){
+      made.push(addNodeAt("entity", {}, bx + (vertical ? 0 : i * 260), by + (vertical ? i * 200 : 0)));
+    }
+    var chain = node ? [node].concat(made) : made;
+    if (chain.length < 2){
+      selectedNodeIds = new Set(made.map(function(m){ return m.id; })); selectedEdgeIds = new Set(); render();
+      return;
+    }
+    linkSelectedEntitiesInChain(chain, {
+      vertical: vertical, noRelationships: !withRel,
+      selectIds: made.map(function(m){ return m.id; })
+    });
+  }
+  backdrop.addEventListener("keydown", function(e){
+    if (e.key === "Enter"){ e.preventDefault(); submit(); }
+    else if (e.key === "Escape"){ e.stopPropagation(); cleanup(); }
+  });
+  backdrop.addEventListener("click", function(e){ if (e.target === backdrop) cleanup(); });
+  backdrop.querySelector('[data-a="cancel"]').addEventListener("click", cleanup);
+  backdrop.querySelector('[data-a="ok"]').addEventListener("click", submit);
+  qty.focus(); qty.select();
+}
 
 /* ---------- disposição do modelo inteiro (vertical / horizontal) ---------- */
 // Pedido do usuário: com TODOS os objetos selecionados, o menu do botão direito ganha
@@ -4024,7 +4118,7 @@ function layoutWholeModel(vertical){
   pendingAdd = null;
   render();
   fitToContent();
-  showToast((vertical ? "Disposição vertical aplicada: entidades em coluna, atributos à direita." : "Disposição horizontal aplicada: entidades em fileira, atributos acima.") + " Ctrl+Z desfaz.");
+  showToast((vertical ? "Alinhamento vertical aplicado: entidades em coluna, atributos à direita." : "Alinhamento horizontal aplicado: entidades em fileira, atributos acima.") + " Ctrl+Z desfaz.");
 }
 
 function selfRelationshipPosition(entity, relDims){
@@ -4259,7 +4353,19 @@ function alignEntityAttributes(entity, mode){
 // tratamento de "keydown" mais abaixo, que reconhece essa sequência de duas teclas.
 var ALIGN_SHORTCUT_KEYS = { e: "left", d: "right", c: "top", b: "bottom" };
 var ALIGN_SHORTCUT_CYCLE = ["left", "right", "top", "bottom"];
+function selectAllObjects(){
+  if (!state.nodes.length){ showToast("O modelo não tem objetos para selecionar.", "warn"); return; }
+  selectedNodeIds = new Set(state.nodes.map(function(n){ return n.id; }));
+  selectedEdgeIds = new Set();
+  render();
+  showToast(state.nodes.length + " objeto(s) selecionado(s).");
+}
 var alignShortcutPending = null; // { node, timer } -- enquanto se aguarda a segunda letra (E/D/C/B) após Ctrl+A
+function allObjectsSelected(){
+  if (pendingAdd || connectMode || physicalActive || !state.nodes.length) return false;
+  return state.nodes.every(function(n){ return n.type === "note" || selectedNodeIds.has(n.id); }) &&
+    state.nodes.some(function(n){ return n.type === "entity" || n.type === "relationship"; });
+}
 function clearAlignShortcutPending(){
   if (alignShortcutPending && alignShortcutPending.timer) clearTimeout(alignShortcutPending.timer);
   alignShortcutPending = null;
@@ -4267,30 +4373,29 @@ function clearAlignShortcutPending(){
 // Elemento-alvo do atalho: só faz sentido com exatamente um elemento selecionado (entidade ou
 // relacionamento), do mesmo jeito que o menu de contexto só abre nesse caso.
 function getAlignShortcutTarget(){
+  // Devolve a LISTA de entidades/relacionamentos selecionados (um ou vários), ou null.
   if (pendingAdd || connectMode) return null;
-  if (selectedNodeIds.size !== 1 || selectedEdgeIds.size) return null;
-  var node = getNode(Array.from(selectedNodeIds)[0]);
-  if (!node || (node.type !== "entity" && node.type !== "relationship")) return null;
-  return node;
+  var group = Array.from(selectedNodeIds).map(getNode).filter(function(n){ return n && (n.type === "entity" || n.type === "relationship"); });
+  return group.length ? group : null;
 }
-function applyAttributeAlignShortcut(node, mode){
-  if (!alignEntityAttributes(node, mode)){
-    showToast(noAttrsToOrganizeMsg(node), "warn");
+function applyAttributeAlignShortcut(nodes, mode){
+  nodes = Array.isArray(nodes) ? nodes : [nodes];
+  var any = false;
+  nodes.forEach(function(n){ if (alignEntityAttributes(n, mode)) any = true; });
+  if (!any){
+    showToast(nodes.length === 1 ? noAttrsToOrganizeMsg(nodes[0]) : "Nenhum dos elementos selecionados tem atributos para organizar.", "warn");
     return;
   }
   render();
-  // Pedido do usuário: "Ao mandar alinhar os atributos, não quero que a mensagem 'Atributos
-  // organizados' seja mostrada." -- o reposicionamento em si já é visível no quadro, sem precisar
-  // de um toast confirmando (mas o aviso de "não tem atributos para organizar" acima continua,
-  // já que ali não há nenhuma mudança visual que avise o usuário sozinha).
+  // Sem toast de confirmação (pedido do usuário): o reposicionamento já é visível no quadro.
 }
 // Ctrl+A sozinho (sem a segunda letra chegar a tempo): aplica o próximo arranjo da sequência
-// esquerda -> direita -> acima -> abaixo -> esquerda..., a cada nova aplicação do atalho -- não
-// necessariamente o "esquerda" sempre, pra ficar consistente com apertar Ctrl+A repetidas vezes.
-function applyAttributeAlignCycleShortcut(node){
-  var curIdx = ALIGN_SHORTCUT_CYCLE.indexOf(node.attrAlignMode);
+// esquerda -> direita -> acima -> abaixo -> esquerda..., a cada nova aplicação do atalho.
+function applyAttributeAlignCycleShortcut(nodes){
+  nodes = Array.isArray(nodes) ? nodes : [nodes];
+  var curIdx = ALIGN_SHORTCUT_CYCLE.indexOf(nodes[0].attrAlignMode);
   var nextMode = ALIGN_SHORTCUT_CYCLE[(curIdx + 1) % ALIGN_SHORTCUT_CYCLE.length];
-  applyAttributeAlignShortcut(node, nextMode);
+  applyAttributeAlignShortcut(nodes, nextMode);
 }
 // Menu de contexto (botão direito sobre uma entidade com atributos) para escolher um dos quatro
 // arranjos acima. Segue o mesmo padrão visual de askChoice3/askConfirm (modal-backdrop criado na
@@ -4319,9 +4424,13 @@ function showAttributeAlignMenu(entity, opts){
     '<line x1="4" y1="4.4" x2="12" y2="4.4"/>' +
     '<line x1="4" y1="7.7" x2="12" y2="7.7"/>' +
     '<line x1="4" y1="11" x2="12" y2="11"/></svg>';
+  // Atalhos exibidos à direita (só os de alinhamento têm; Ctrl+AE/AD/AC/AB funcionam com uma
+  // entidade/relacionamento único selecionado).
+  var ITEM_SHORTCUTS = { left: "Ctrl+AE", right: "Ctrl+AD", top: "Ctrl+AC", bottom: "Ctrl+AB", "layout-v": "Ctrl+AV", "layout-h": "Ctrl+AH", "select-all": "Ctrl+Alt+S" };
   function itemHtml(key, title, desc, iconSvg){
+    var sc = ITEM_SHORTCUTS[key] ? '<span class="ctx-shortcut">' + ITEM_SHORTCUTS[key] + '</span>' : '';
     return '<button class="dl-menu-item" data-a="' + key + '">' + iconSvg +
-      '<span><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml(desc) + '</small></span></button>';
+      '<span><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml(desc) + '</small></span>' + sc + '</button>';
   }
   // Texto das descrições: concorda em gênero/artigo com o tipo do nó, já que este menu agora
   // também abre para relacionamentos ("do relacionamento"), não só entidades ("da entidade").
@@ -4344,11 +4453,14 @@ function showAttributeAlignMenu(entity, opts){
         itemHtml("bottom", "Alinhar abaixo", "Um abaixo do outro, centralizados, abaixo " + doNo + ".", bottomIcon) +
         (opts.layoutOptions
           ? '<hr class="dl-menu-divider">' +
-            itemHtml("layout-v", "Disposição vertical", "Todo o modelo em uma coluna, com os relacionamentos entre as entidades e os atributos à direita.",
+            itemHtml("layout-v", "Alinhamento vertical", "Todo o modelo em uma coluna, com os relacionamentos entre as entidades e os atributos à direita.",
               '<svg viewBox="0 0 16 16" fill="none" stroke-width="1.5"><rect x="5" y="1" width="6" height="3.4" rx=".6"/><path d="M8 4.4v2"/><path d="M8 6.4l2.2 1.6L8 9.6 5.8 8z"/><path d="M8 9.6v2"/><rect x="5" y="11.6" width="6" height="3.4" rx=".6"/></svg>') +
-            itemHtml("layout-h", "Disposição horizontal", "Todo o modelo em uma fileira, com os relacionamentos entre as entidades e os atributos acima.",
+            itemHtml("layout-h", "Alinhamento horizontal", "Todo o modelo em uma fileira, com os relacionamentos entre as entidades e os atributos acima.",
               '<svg viewBox="0 0 16 16" fill="none" stroke-width="1.5"><rect x="1" y="6.3" width="3.4" height="3.4" rx=".6"/><path d="M4.4 8h1.8"/><path d="M6.2 8L8 6.3 9.8 8 8 9.7z"/><path d="M9.8 8h1.8"/><rect x="11.6" y="6.3" width="3.4" height="3.4" rx=".6"/></svg>')
           : '') +
+        '<hr class="dl-menu-divider">' +
+        itemHtml("select-all", "Selecionar tudo", "Seleciona todos os objetos do modelo.",
+          '<svg viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-dasharray="2.2 1.6"><rect x="2" y="2" width="12" height="12" rx="1.2"/></svg>') +
       '</div>' +
       '<div class="modal-actions"><button data-a="cancel">Cancelar</button></div>' +
     '</div>';
@@ -4356,6 +4468,10 @@ function showAttributeAlignMenu(entity, opts){
   function cleanup(){ backdrop.remove(); }
   backdrop.addEventListener("click", function(e){ if (e.target === backdrop) cleanup(); });
   backdrop.querySelector('[data-a="cancel"]').addEventListener("click", cleanup);
+  backdrop.querySelector('[data-a="select-all"]').addEventListener("click", function(){
+    cleanup();
+    selectAllObjects();
+  });
   if (opts.layoutOptions){
     ["layout-v", "layout-h"].forEach(function(key){
       backdrop.querySelector('[data-a="' + key + '"]').addEventListener("click", function(){
@@ -4467,9 +4583,9 @@ stageEl.addEventListener("pointerdown", function(e){
       var cur = screenToSvg(ev.clientX, ev.clientY);
       updateMarqueeRect(startSvg.x, startSvg.y, cur.x, cur.y);
     } else if (!pendingAdd){
-      var r = stageEl.getBoundingClientRect();
-      view.x = startView.x - dx * (view.w / r.width);
-      view.y = startView.y - dy * (view.h / r.height);
+      var psc = stageScale().sc;
+      view.x = startView.x - dx / psc;
+      view.y = startView.y - dy / psc;
       applyViewBox();
     }
   }
@@ -4534,6 +4650,10 @@ stageEl.addEventListener("wheel", function(e){
   e.preventDefault();
   var pt = screenToSvg(e.clientX, e.clientY);
   zoomBy(e.deltaY > 0 ? 1.12 : 0.89, pt.x, pt.y);
+  // Reancora: mantém o ponto sob o cursor parado mesmo com a folga do encaixe "meet".
+  var pt2 = screenToSvg(e.clientX, e.clientY);
+  view.x += pt.x - pt2.x; view.y += pt.y - pt2.y;
+  applyViewBox();
 }, { passive:false });
 
 document.getElementById("zoomIn").addEventListener("click", function(){ zoomBy(0.82); });
@@ -4728,6 +4848,10 @@ async function bulkAddFromToolbarButton(btn, fixedQty){
       add: function(n){ if (isPk) addPkColumnTo(n); else addPlainColumnTo(n); }
     };
   }
+  if (addType === "entity"){
+    askCreateEntities(null);
+    return;
+  }
   if (!spec){
     showToast("O botão direito adiciona vários de uma vez só em Simples e Identificador (modelo conceitual) ou em Campo e Chave primária (modelo lógico).", "warn");
     return;
@@ -4852,8 +4976,12 @@ document.addEventListener("keydown", function(e){
   // espera (sem impedir o tratamento normal dela logo abaixo, inclusive as outras ramificações
   // deste mesmo "if/else").
   var pendingAlignBefore = alignShortcutPending;
-  var isAlignShortcutFollowup = pendingAlignBefore && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey &&
-    ALIGN_SHORTCUT_KEYS.hasOwnProperty((e.key || "").toLowerCase());
+  var alignKeyLc = (e.key || "").toLowerCase();
+  var isLayoutFollowup = pendingAlignBefore && pendingAlignBefore.layout && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey &&
+    (alignKeyLc === "v" || alignKeyLc === "h");
+  var isFitFollowup = pendingAlignBefore && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && alignKeyLc === "j";
+  var isAlignShortcutFollowup = !!isFitFollowup || (pendingAlignBefore && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey &&
+    ((pendingAlignBefore.node && ALIGN_SHORTCUT_KEYS.hasOwnProperty(alignKeyLc)) || isLayoutFollowup));
   if (pendingAlignBefore && !isAlignShortcutFollowup) clearAlignShortcutPending();
   // Atalho de troca de tela (Ctrl+M + C/L/F): mesma lógica de "segunda tecla" acima, mas com seu
   // próprio estado (modeShortcutPending), independente do atalho de alinhamento.
@@ -4876,7 +5004,9 @@ document.addEventListener("keydown", function(e){
     var alignFollowupNode = pendingAlignBefore.node;
     var alignFollowupMode = ALIGN_SHORTCUT_KEYS[e.key.toLowerCase()];
     clearAlignShortcutPending();
-    applyAttributeAlignShortcut(alignFollowupNode, alignFollowupMode);
+    if (isFitFollowup){ fitToContent(); }
+    else if (isLayoutFollowup) layoutWholeModel(alignKeyLc === "v");
+    else applyAttributeAlignShortcut(alignFollowupNode, alignFollowupMode);
   } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "a" || e.key === "A") && !inField){
     // Pedido do usuário: "Com uma entidade selecionada, gostaria que as teclas de atalho tivessem a
     // seguinte correspondência: ctrl + ae (Alinha atributos a esquerda); ctrl + ad (Alinha atributos
@@ -4885,16 +5015,26 @@ document.addEventListener("keydown", function(e){
     // ou relacionamento único selecionado, o Ctrl+A segue livre (ex.: continua selecionando texto
     // dentro de um campo, coberto por "!inField" acima).
     var alignShortcutTarget = getAlignShortcutTarget();
-    if (alignShortcutTarget){
+    // Ctrl+AV / Ctrl+AH valem para o modelo inteiro, com ou sem objetos selecionados.
+    var alignLayoutOk = !physicalActive && !pendingAdd && !connectMode && state.nodes.some(function(n){ return n.type === "entity" || n.type === "relationship"; });
+    // Ctrl+AJ (ajustar a tela) vale em qualquer situação nos modelos conceitual/lógico, então o
+    // Ctrl+A sempre abre a espera pela segunda letra fora do modelo físico.
+    if (alignShortcutTarget || alignLayoutOk || !physicalActive){
       e.preventDefault();
+      // Com todos os objetos selecionados, Ctrl+AV / Ctrl+AH aplicam o alinhamento vertical /
+      // horizontal do modelo inteiro (layoutWholeModel); com um só elemento, valem E/D/C/B.
       alignShortcutPending = {
-        node: alignShortcutTarget,
+        node: alignShortcutTarget, layout: alignLayoutOk,
         timer: setTimeout(function(){
           alignShortcutPending = null;
-          applyAttributeAlignCycleShortcut(alignShortcutTarget);
+          if (alignShortcutTarget) applyAttributeAlignCycleShortcut(alignShortcutTarget);
         }, 700)
       };
     }
+  } else if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === "KeyS" && !inField){
+    // Ctrl+Alt+S seleciona todos os objetos do modelo (pedido do usuário).
+    e.preventDefault();
+    if (!physicalActive) selectAllObjects();
   } else if (isModeShortcutFollowup){
     // Segunda letra do atalho de troca de tela (Ctrl+M já tinha sido apertado antes) -- vai direto
     // para o modelo pedido (goToMode, perto de switchMode/enterPhysicalView), sem esperar o prazo
@@ -7433,17 +7573,21 @@ var SHORTCUT_HELP = [
   ]},
   { title: "Edição de elementos", rows: [
     [["Delete", "Backspace"], "Exclui os elementos ou conexões selecionados."],
+    [["Ctrl+Alt+S"], "Seleciona todos os objetos do modelo (S de \"Selecionar\")."],
     [["Ctrl+C"], "Copia os elementos selecionados."],
     [["Ctrl+V"], "Cola os elementos copiados (no mesmo modelo em que foram copiados)."],
     [["Qualquer letra"], "Com um único elemento selecionado, começa a renomeá-lo: a letra substitui o nome e o cursor vai para o campo Nome."]
   ]},
-  { title: "Alinhar atributos (entidade ou relacionamento selecionado)", rows: [
+  { title: "Alinhar atributos (um ou vários elementos selecionados)", rows: [
     [["Ctrl+AE"], "Alinha os atributos à esquerda."],
     [["Ctrl+AD"], "Alinha os atributos à direita."],
     [["Ctrl+AC"], "Alinha os atributos acima."],
     [["Ctrl+AB"], "Alinha os atributos abaixo."],
+    [["Ctrl+AV"], "Alinhamento vertical do modelo inteiro (não depende da seleção)."],
+    [["Ctrl+AH"], "Alinhamento horizontal do modelo inteiro (não depende da seleção)."],
+    [["Ctrl+AJ"], "Ajusta a tela (zoom) para mostrar todo o modelo, igual ao botão de ajustar tela."],
     [["Ctrl+A"], "Sozinho: aplica o próximo alinhamento da sequência a cada vez."],
-    [["Botão direito"], "Sobre a entidade ou o relacionamento: abre o menu de alinhamento."]
+    [["Botão direito"], "Sobre o relacionamento (ou vários selecionados): abre o menu de alinhamento. Sobre uma entidade: abre a janela para criar várias entidades."]
   ]},
   { title: "Mouse e quadro", rows: [
     [["Roda do mouse"], "Aproxima ou afasta o zoom."],
