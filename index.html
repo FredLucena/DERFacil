@@ -441,6 +441,24 @@
     font-family:var(--font-mono); font-size:12.5px; line-height:1.6; color:var(--ink); white-space:pre;
   }
   .sql-output:focus{ outline:none; background:var(--surface); }
+  /* Dicionário de Dados (gerado a partir do Modelo Lógico): tabela no modelo Tabela | Nome da
+     Coluna | Tipo de Dado | Restrições | Descrição | Tabela Relacionada. */
+  .dict-actions{ display:flex; gap:8px; }
+  .dict-scroll{ flex:1; overflow:auto; padding:16px 20px; background:var(--bg); }
+  .dict-table{ border-collapse:collapse; width:100%; min-width:760px; background:var(--surface); color:var(--ink); font-size:13px; }
+  .dict-table th, .dict-table td{ border:1px solid var(--ink); padding:6px 8px; text-align:center; vertical-align:middle; white-space:pre-line; }
+  .dict-table th:not(.dict-act){ font-weight:700; background:#d9d9d9; background:color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+  .dict-table td[contenteditable]:focus{ outline:2px solid var(--select, #2b6cb0); outline-offset:-2px; background:var(--bg); }
+  .dict-table .dict-act{ border:none; width:28px; padding:0 0 0 6px; background:transparent; }
+  .dict-del{ border:none; background:transparent; color:var(--ink-soft); font-size:16px; cursor:pointer; line-height:1; }
+  .dict-del:hover{ color:#b42318; }
+  .dict-table{ table-layout:fixed; }
+  .dict-table th:nth-child(1){ width:14%; } .dict-table th:nth-child(2){ width:19%; } .dict-table th:nth-child(3){ width:14%; }
+  .dict-table th:nth-child(4){ width:19%; } .dict-table th:nth-child(5){ width:16%; } .dict-table th:nth-child(6){ width:18%; }
+  .dict-table td{ overflow-wrap:anywhere; }
+  .dict-table th.dict-act, .dict-table td.dict-act{ width:28px; }
+  .dict-row-add{ margin:8px 0 22px; }
+  .dict-empty{ color:var(--ink-soft); font-size:13px; padding:12px 0; }
 
   .legend-btn-wrap{ position:absolute; left:16px; bottom:16px; }
 
@@ -1051,6 +1069,16 @@
          coluna) -- ver generateSqlFromLogicalModel/renderPhysicalSql. Fica no lugar do quadro
          (svg#stage), que fica escondido enquanto esta visão está ativa (ver applyModeUI). A caixa
          é editável -- o usuário pode alterar o SQL livremente, sem que isso afete o modelo lógico. -->
+    <div class="sql-view" id="dictView" hidden>
+      <div class="sql-view-bar">
+        <span class="sql-view-title">Dicionário de Dados — gerado a partir do Modelo Lógico</span>
+        <span class="dict-actions">
+          <button type="button" class="hbtn" id="btnCopyDict" title="Copiar o dicionário (colar no Word ou no Excel mantém as colunas)">Copiar tabela</button>
+          <button type="button" class="hbtn" id="btnCsvDict" title="Baixar o dicionário como arquivo CSV (abre no Excel)">Baixar CSV</button>
+        </span>
+      </div>
+      <div class="dict-scroll" id="dictScroll"></div>
+    </div>
     <div class="sql-view" id="sqlView" hidden>
       <div class="sql-view-bar">
         <span class="sql-view-title">Modelo Físico — SQL gerado a partir do Modelo Lógico</span>
@@ -1228,6 +1256,8 @@ var state = null;
 // sessões -- reabrir o projeto sempre volta para conceitual/lógica (o modo realmente salvo),
 // nunca direto no físico.
 var physicalActive = false;
+var dictionaryRows = null; // linhas do Dicionário de Dados (arrays de 6 textos), editáveis e salvas com o projeto; null = ainda não gerado
+var dictActive = false; // visão do Dicionário de Dados (aberta a partir do Modelo Lógico; nunca é salva)
 // O texto do SQL exibido/editável no Modelo Físico. É independente do modelo lógico -- só é
 // (re)gerado a partir dele quando o usuário escolhe explicitamente "Sim" na janela "Gerar modelo
 // físico"; fora isso, o usuário pode editar livremente sem que isso afete o modelo lógico. Ao
@@ -4384,7 +4414,7 @@ function selectAllObjects(){
 }
 var alignShortcutPending = null; // { node, timer } -- enquanto se aguarda a segunda letra (E/D/C/B) após Ctrl+A
 function allObjectsSelected(){
-  if (pendingAdd || connectMode || physicalActive || !state.nodes.length) return false;
+  if (pendingAdd || connectMode || physicalActive || dictActive || !state.nodes.length) return false;
   return state.nodes.every(function(n){ return n.type === "note" || selectedNodeIds.has(n.id); }) &&
     state.nodes.some(function(n){ return n.type === "entity" || n.type === "relationship"; });
 }
@@ -4973,6 +5003,11 @@ document.getElementById("gridSizeUp").addEventListener("click", function(){ setG
 // gerar/regenerar nenhum modelo (equivalente a clicar um dos três itens BASE desse menu, nunca os
 // itens "Gerar Modelo X").
 var MODE_SHORTCUT_KEYS = { c: "conceptual", l: "logical", f: "physical" };
+var dictShortcutPending = null; // { timer } -- aguardando o segundo D após Ctrl+D (Ctrl+DD = Gerar Dicionário de Dados)
+function clearDictShortcutPending(){
+  if (dictShortcutPending && dictShortcutPending.timer) clearTimeout(dictShortcutPending.timer);
+  dictShortcutPending = null;
+}
 var modeShortcutPending = null; // { timer } -- enquanto se aguarda a segunda letra (C/L/F) após Ctrl+M
 function clearModeShortcutPending(){
   if (modeShortcutPending && modeShortcutPending.timer) clearTimeout(modeShortcutPending.timer);
@@ -5012,6 +5047,8 @@ document.addEventListener("keydown", function(e){
   if (pendingAlignBefore && !isAlignShortcutFollowup) clearAlignShortcutPending();
   // Atalho de troca de tela (Ctrl+M + C/L/F): mesma lógica de "segunda tecla" acima, mas com seu
   // próprio estado (modeShortcutPending), independente do atalho de alinhamento.
+  var isDictFollowup = !!dictShortcutPending && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "D");
+  if (dictShortcutPending && !isDictFollowup && e.key !== "Control" && e.key !== "Meta") clearDictShortcutPending();
   var pendingModeBefore = modeShortcutPending;
   var isModeShortcutFollowup = pendingModeBefore && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey &&
     MODE_SHORTCUT_KEYS.hasOwnProperty((e.key || "").toLowerCase());
@@ -5043,10 +5080,10 @@ document.addEventListener("keydown", function(e){
     // dentro de um campo, coberto por "!inField" acima).
     var alignShortcutTarget = getAlignShortcutTarget();
     // Ctrl+AV / Ctrl+AH valem para o modelo inteiro, com ou sem objetos selecionados.
-    var alignLayoutOk = !physicalActive && !pendingAdd && !connectMode && state.nodes.some(function(n){ return n.type === "entity" || n.type === "relationship"; });
+    var alignLayoutOk = !physicalActive && !dictActive && !pendingAdd && !connectMode && state.nodes.some(function(n){ return n.type === "entity" || n.type === "relationship"; });
     // Ctrl+AJ (ajustar a tela) vale em qualquer situação nos modelos conceitual/lógico, então o
     // Ctrl+A sempre abre a espera pela segunda letra fora do modelo físico.
-    if (alignShortcutTarget || alignLayoutOk || !physicalActive){
+    if (alignShortcutTarget || alignLayoutOk || (!physicalActive && !dictActive)){
       e.preventDefault();
       // Com todos os objetos selecionados, Ctrl+AV / Ctrl+AH aplicam o alinhamento vertical /
       // horizontal do modelo inteiro (layoutWholeModel); com um só elemento, valem E/D/C/B.
@@ -5061,7 +5098,18 @@ document.addEventListener("keydown", function(e){
   } else if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === "KeyS" && !inField){
     // Ctrl+Alt+S seleciona todos os objetos do modelo (pedido do usuário).
     e.preventDefault();
-    if (!physicalActive) selectAllObjects();
+    if (!physicalActive && !dictActive) selectAllObjects();
+  } else if (isDictFollowup){
+    // Ctrl+DD: vai para o Dicionário de Dados (item "Dicionário de Dados" do menu de modelos) --
+    // abre o que já existe (editado/salvo) e só gera na primeira vez, sem sobrescrever edições.
+    e.preventDefault();
+    clearDictShortcutPending();
+    goToMode("dictionary");
+  } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "D") && !inField){
+    // Ctrl+D (favoritar, no navegador) só espera o segundo D; o atalho completo é Ctrl+DD.
+    e.preventDefault();
+    clearDictShortcutPending();
+    dictShortcutPending = { timer: setTimeout(function(){ dictShortcutPending = null; }, 700) };
   } else if (isModeShortcutFollowup){
     // Segunda letra do atalho de troca de tela (Ctrl+M já tinha sido apertado antes) -- vai direto
     // para o modelo pedido (goToMode, perto de switchMode/enterPhysicalView), sem esperar o prazo
@@ -5875,7 +5923,7 @@ function alignBtn(kind, current, title){
 // Um projeto salvo agora guarda os dois modelos: { projectName, mode, conceptual, logical }.
 // buildProjectSnapshot() empacota o estado atual nesse formato para autosave/exportação.
 function buildProjectSnapshot(){
-  return { projectName: state.projectName, mode: mode, conceptual: conceptualModel, logical: logicalModel, physicalSql: physicalSql };
+  return { projectName: state.projectName, mode: mode, conceptual: conceptualModel, logical: logicalModel, physicalSql: physicalSql, dictionary: dictionaryRows };
 }
 var autosaveTimer = null;
 function scheduleAutosave(){
@@ -5903,6 +5951,9 @@ function applyLoadedProject(parsedProject){
   // Bug relatado pelo usuário: o SQL do Modelo Físico não estava sendo salvo -- restaura o texto
   // salvo (projetos salvos antes desta correção não têm o campo, então fica vazio normalmente).
   physicalSql = (typeof parsedProject.physicalSql === "string") ? parsedProject.physicalSql : "";
+  dictionaryRows = Array.isArray(parsedProject.dictionary)
+    ? parsedProject.dictionary.filter(Array.isArray).map(function(r){ var o = []; for (var i = 0; i < 6; i++) o.push(String(r[i] == null ? "" : r[i])); return o; })
+    : null;
 }
 
 function loadInitialState(){
@@ -7250,11 +7301,13 @@ function applyModeUI(){
   // Modelo Físico: some com a barra de ferramentas, o painel de propriedades e o quadro
   // (svg#stage + zoom), e mostra o SQL gerado no lugar deles (ver renderPhysicalSql) -- não há
   // nada para arrastar/selecionar/editar nessa visão, só o texto do SQL.
-  toolbarWrapEl.hidden = physicalActive;
-  panelWrapEl.hidden = physicalActive;
-  document.getElementById("stage").hidden = physicalActive;
-  document.getElementById("zoomCtl").hidden = physicalActive;
+  var overlay = physicalActive || dictActive;
+  toolbarWrapEl.hidden = overlay;
+  panelWrapEl.hidden = overlay;
+  document.getElementById("stage").hidden = overlay;
+  document.getElementById("zoomCtl").hidden = overlay;
   document.getElementById("sqlView").hidden = !physicalActive;
+  document.getElementById("dictView").hidden = !dictActive;
 }
 // Pedido do usuário: trocar de modelo no seletor do topo não deve mostrar nenhuma janela de
 // confirmação. Regra única, sem perguntar nada: se o modelo de destino ainda não existe, gera
@@ -7298,6 +7351,193 @@ function switchMode(target, force){
 // caixa ainda está vazia e já existe um modelo lógico para gerar a partir dele. Não mexe no
 // modelo conceitual nem no lógico em nenhum caso -- entrar no Físico é puramente uma troca de
 // VISÃO (ver applyModeUI), nunca uma troca de modo.
+/* ---------- Dicionário de Dados (a partir do Modelo Lógico) ---------- */
+var DICT_HEADERS = ["Tabela", "Nome da Coluna", "Tipo de Dado", "Restrições", "Descrição", "Tabela Relacionada"];
+// Uma linha por coluna de cada tabela do modelo lógico. O nome da tabela só aparece na primeira
+// linha dela (as demais ficam em branco, como no modelo fornecido). Restrições: PK (sozinho, para
+// chave primária), FK, e cada restrição da coluna (NOT NULL, CHECK(...), DEFAULT ...); sem
+// NOT NULL e sem PK, "NULL". Tabela Relacionada: na coluna FK, "TabelaReferenciada(coluna)"; na
+// coluna PK, as tabelas que referenciam esta, como "Tabela(PK dela)".
+function buildDictionaryRows(logical){
+  var tables = logical && Array.isArray(logical.nodes) ? logical.nodes.filter(function(t){ return t.type === "table"; }) : [];
+  var byId = {};
+  tables.forEach(function(t){ byId[t.id] = t; });
+  function pkNames(t){ return (t.columns || []).filter(function(c){ return c.pk; }).map(function(c){ return c.name; }).join(", "); }
+  var rows = [];
+  tables.forEach(function(t){
+    var cols = t.columns || [];
+    cols.forEach(function(c, idx){
+      var cons = [];
+      if (c.pk) cons.push("PK");
+      if (c.fk) cons.push("FK");
+      var hasNotNull = !!c.pk;
+      (c.constraints || []).forEach(function(cst){
+        var clause = sqlConstraintClause(cst);
+        if (!clause) return;
+        var txt = clause.inline ? clause.inline.replace(/^CHECK \(/, "CHECK(") : clause.comment;
+        if (clause.inline === "NOT NULL") hasNotNull = true;
+        if (c.pk && clause.inline === "NOT NULL") return; // PK já implica NOT NULL
+        cons.push(txt);
+      });
+      if (!hasNotNull) cons.push("NULL");
+      if (c.pk && cons.length > 1) cons = cons.filter(function(x){ return x !== "NULL"; });
+      var related = [];
+      if (c.fk && c.fkTable && byId[c.fkTable]){
+        related.push(byId[c.fkTable].name + "(" + (c.fkColumn || "") + ")");
+      }
+      if (c.pk){
+        tables.forEach(function(u){
+          if (u.id === t.id) return;
+          var refs = (u.columns || []).some(function(uc){ return uc.fk && uc.fkTable === t.id; });
+          if (refs) related.push(u.name + "(" + pkNames(u) + ")");
+        });
+      }
+      rows.push({
+        table: idx === 0 ? (t.name || "") : "",
+        name: c.name || "",
+        type: fullDataType(c),
+        constraints: cons.join("\n"),
+        description: c.description || "",
+        related: related.join("\n")
+      });
+    });
+  });
+  return rows;
+}
+function dictionaryRowsAsMatrix(rows){
+  return rows.map(function(r){ return [r.table, r.name, r.type, r.constraints, r.description, r.related]; });
+}
+// Gera as linhas do dicionário a partir do modelo lógico, reaproveitando a Descrição que o usuário já
+// tinha escrito para a mesma tabela+coluna (a tabela continua em branco nas linhas seguintes).
+function generateDictionaryRows(){
+  var old = {};
+  if (dictionaryRows){
+    var curTable = "";
+    dictionaryRows.forEach(function(r){
+      if (r[0]) curTable = r[0];
+      if (r[4]) old[curTable + "\u0001" + r[1]] = r[4];
+    });
+  }
+  var curT = "";
+  return dictionaryRowsAsMatrix(buildDictionaryRows(logicalModel)).map(function(r){
+    if (r[0]) curT = r[0];
+    var keep = old[curT + "\u0001" + r[1]];
+    if (keep && !r[4]) r[4] = keep;
+    return r;
+  });
+}
+// Os dados são uma lista única de linhas; cada tabela do modelo lógico vira um grupo (começa numa
+// linha com o nome da tabela preenchido) e é desenhada como uma tabela separada.
+function dictionaryGroups(){
+  var groups = [];
+  (dictionaryRows || []).forEach(function(r, i){
+    if (!groups.length || r[0]) groups.push({ start: i, end: i });
+    else groups[groups.length - 1].end = i;
+  });
+  return groups;
+}
+function dictionaryRowHtml(r, ri){
+  return '<tr data-r="' + ri + '">' + r.map(function(v, ci){
+    return '<td contenteditable="true" spellcheck="false" data-c="' + ci + '">' + escapeHtml(v) + "</td>";
+  }).join("") + '<td class="dict-act"><button type="button" class="dict-del" title="Remover esta linha" data-del="' + ri + '">×</button></td></tr>';
+}
+function renderDictionaryView(){
+  var host = document.getElementById("dictScroll");
+  if (!host) return;
+  var groups = dictionaryGroups();
+  if (!groups.length){
+    host.innerHTML = '<p class="dict-empty">Nenhuma tabela no Modelo Lógico ainda — crie tabelas (ou gere o modelo lógico a partir do conceitual) e use "Gerar Dicionário de Dados". Você também pode adicionar tabelas à mão.</p>' +
+      '<button type="button" class="hbtn" id="btnDictAddTable">Adicionar tabela</button>';
+  } else {
+    host.innerHTML = groups.map(function(g, gi){
+      var body = "";
+      for (var ri = g.start; ri <= g.end; ri++) body += dictionaryRowHtml(dictionaryRows[ri], ri);
+      return '<table class="dict-table"><thead><tr>' +
+        DICT_HEADERS.map(function(h){ return "<th>" + escapeHtml(h) + "</th>"; }).join("") +
+        '<th class="dict-act"></th></tr></thead><tbody>' + body + '</tbody></table>' +
+        '<p class="dict-row-add"><button type="button" class="hbtn" data-addrow="' + g.end + '">Adicionar linha</button></p>';
+    }).join("") + '<p><button type="button" class="hbtn" id="btnDictAddTable">Adicionar tabela</button></p>';
+  }
+  document.getElementById("btnDictAddTable").addEventListener("click", function(){
+    dictionaryRows = dictionaryRows || [];
+    dictionaryRows.push(["Nova tabela", "", "", "", "", ""]);
+    scheduleAutosave();
+    renderDictionaryView();
+  });
+}
+// Texto (TSV/CSV) com uma tabela por tabela do modelo, separadas por uma linha em branco.
+function dictionaryAsText(cellFn, sep, eol){
+  return dictionaryGroups().map(function(g){
+    var rows = [DICT_HEADERS].concat(dictionaryRows.slice(g.start, g.end + 1));
+    return rows.map(function(r){ return r.map(cellFn).join(sep); }).join(eol);
+  }).join(eol + eol);
+}
+document.getElementById("dictScroll").addEventListener("input", function(e){
+  var td = e.target.closest && e.target.closest("td[data-c]");
+  if (!td || !dictionaryRows) return;
+  var tr = td.parentNode;
+  var r = dictionaryRows[Number(tr.getAttribute("data-r"))];
+  if (!r) return;
+  r[Number(td.getAttribute("data-c"))] = td.innerText.replace(/\r/g, "").replace(/\n+$/, "");
+  scheduleAutosave();
+});
+document.getElementById("dictScroll").addEventListener("click", function(e){
+  if (!dictionaryRows) return;
+  var add = e.target.closest && e.target.closest("[data-addrow]");
+  if (add){
+    dictionaryRows.splice(Number(add.getAttribute("data-addrow")) + 1, 0, ["", "", "", "", "", ""]);
+    scheduleAutosave();
+    renderDictionaryView();
+    return;
+  }
+  var del = e.target.closest && e.target.closest("[data-del]");
+  if (!del) return;
+  var idx = Number(del.getAttribute("data-del"));
+  var row = dictionaryRows[idx];
+  // Se for a linha que traz o nome da tabela e a tabela tem outras linhas, o nome passa para a seguinte.
+  if (row && row[0] && dictionaryRows[idx + 1] && !dictionaryRows[idx + 1][0]) dictionaryRows[idx + 1][0] = row[0];
+  dictionaryRows.splice(idx, 1);
+  scheduleAutosave();
+  renderDictionaryView();
+});
+// regenerate: refaz o dicionário a partir do modelo lógico (item "Gerar Dicionário de Dados");
+// sem ele, abre o que já existe (editado/salvo) e só gera na primeira vez.
+function enterDictionaryView(regenerate){
+  if (!logicalModel){
+    logicalModel = convertConceptualToLogical(conceptualModel);
+  }
+  if (regenerate || !dictionaryRows){
+    dictionaryRows = generateDictionaryRows();
+  }
+  scheduleAutosave();
+  physicalActive = false;
+  dictActive = true;
+  applyModeUI();
+  renderDictionaryView();
+}
+document.getElementById("btnCopyDict").addEventListener("click", function(){
+  var m = dictionaryRows || [];
+  if (!m.length) return;
+  var cell = function(v){ return /[\t\n"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  var text = dictionaryAsText(cell, "\t", "\n");
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ showToast("Dicionário copiado — cole no Word ou no Excel."); })
+      .catch(function(){ showToast("Não foi possível copiar automaticamente.", "warn"); });
+  } else showToast("Não foi possível copiar automaticamente.", "warn");
+});
+document.getElementById("btnCsvDict").addEventListener("click", function(){
+  var m = dictionaryRows || [];
+  if (!m.length) return;
+  var q = function(v){ return '"' + String(v).replace(/"/g, '""') + '"'; };
+  var csv = "\ufeff" + dictionaryAsText(q, ";", "\r\n");
+  var blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = ((logicalModel && logicalModel.projectName) || "modelo") + " - dicionario de dados.csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+});
+
 function enterPhysicalView(){
   if (logicalModel && !physicalSql){
     physicalSql = generateSqlFromLogicalModel(logicalModel);
@@ -7305,12 +7545,14 @@ function enterPhysicalView(){
   }
   // Já existe algum SQL na caixa, ou não há modelo lógico ainda: mostra a visão física com o que
   // já estiver lá (gerado antes, editado à mão, ou vazia mesmo), sem mexer em nada.
+  dictActive = false;
   physicalActive = true;
   applyModeUI();
   renderPhysicalSql();
 }
 function exitPhysicalView(target, force){
   physicalActive = false;
+  dictActive = false;
   if (target !== mode || force) switchMode(target, force);
   else { applyModeUI(); render(); fitToContent(); }
 }
@@ -7321,7 +7563,8 @@ function exitPhysicalView(target, force){
 // modo pedido já era o atual -- ver o comentário em switchMode). Trocar de modelo por aqui nunca
 // mostra diálogo de confirmação (ver switchMode/enterPhysicalView, acima).
 function goToMode(target, force){
-  if (target === "physical") enterPhysicalView();
+  if (target === "dictionary") enterDictionaryView(false);
+  else if (target === "physical") enterPhysicalView();
   else exitPhysicalView(target === "logical" ? "logical" : "conceptual", force);
 }
 // Pedido do usuário: ao selecionar um item "Gerar Modelo X" (diferente dos itens base, que só
@@ -7357,6 +7600,7 @@ function goToMode(target, force){
 // que "nada mudou" (target === mode) e não religava `state` ao logicalModel recém-substituído
 // acima, deixando o quadro mostrando o modelo antigo mesmo com logicalModel já correto por baixo.
 function generateMode(target){
+  if (target === "dictionary"){ enterDictionaryView(true); return; }
   if (target === "logical"){
     var previousLogicalModel = logicalModel;
     // Pedido do usuário: "quando da geração do modelo lógico a partir do modelo físico, os tipos
@@ -7396,11 +7640,12 @@ function generateMode(target){
 var MODE_BASE_ITEMS = [
   { key:"conceptual", label:"Modelo Conceitual", shortcut:"Ctrl+MC" },
   { key:"logical", label:"Modelo Lógico", shortcut:"Ctrl+ML" },
-  { key:"physical", label:"Modelo Físico", shortcut:"Ctrl+MF" }
+  { key:"physical", label:"Modelo Físico", shortcut:"Ctrl+MF" },
+  { key:"dictionary", label:"Dicionário de Dados", shortcut:"Ctrl+DD" }
 ];
 var MODE_EXTRA_ITEMS_BY_CURRENT = {
   conceptual: [ { key:"logical", label:"Gerar Modelo Lógico" } ],
-  logical: [ { key:"conceptual", label:"Gerar Modelo Conceitual" }, { key:"physical", label:"Gerar Modelo Físico" } ],
+  logical: [ { key:"dictionary", label:"Gerar Dicionário de Dados" }, { key:"conceptual", label:"Gerar Modelo Conceitual" }, { key:"physical", label:"Gerar Modelo Físico" } ],
   physical: [ { key:"logical", label:"Gerar Modelo Lógico" } ]
 };
 var modeMenuWrap = document.getElementById("modeMenuWrap");
@@ -7412,7 +7657,7 @@ function modeMenuLabelFor(key){
   return key === "physical" ? "Modelo Físico" : (key === "logical" ? "Modelo Lógico" : "Modelo Conceitual");
 }
 function updateModeMenuLabel(){
-  modeMenuLabelEl.textContent = modeMenuLabelFor(physicalActive ? "physical" : mode);
+  modeMenuLabelEl.textContent = dictActive ? "Dicionário de Dados" : modeMenuLabelFor(physicalActive ? "physical" : mode);
 }
 // "kind" ("base"/"extra") vira uma classe extra (mode-menu-item-base/mode-menu-item-extra) só
 // para diferenciar visualmente/estruturalmente os dois grupos quando precisar (ex.: em testes,
@@ -7428,9 +7673,9 @@ function modeMenuItemHtml(item, isActive, kind){
 // que tanto o item destacado quanto os itens depois da divisória dependem da tela atual no
 // momento em que o menu é aberto.
 function renderModeMenuPanel(){
-  var current = physicalActive ? "physical" : mode;
+  var current = dictActive ? "dictionary" : (physicalActive ? "physical" : mode);
   var baseHtml = MODE_BASE_ITEMS.map(function(item){ return modeMenuItemHtml(item, item.key === current, "base"); }).join("");
-  var extraHtml = (MODE_EXTRA_ITEMS_BY_CURRENT[current] || []).map(function(item){ return modeMenuItemHtml(item, false, "extra"); }).join("");
+  var extraHtml = (MODE_EXTRA_ITEMS_BY_CURRENT[current === "dictionary" ? "logical" : current] || []).map(function(item){ return modeMenuItemHtml(item, false, "extra"); }).join("");
   modeMenuPanel.innerHTML = baseHtml + '<hr class="dl-menu-divider">' + extraHtml;
 }
 function closeModeMenu(){
@@ -7596,6 +7841,7 @@ var SHORTCUT_HELP = [
     [["Ctrl+MC"], "Vai para o Modelo Conceitual."],
     [["Ctrl+ML"], "Vai para o Modelo Lógico."],
     [["Ctrl+MF"], "Vai para o Modelo Físico (SQL)."],
+    [["Ctrl+DD"], "Vai para o Dicionário de Dados (gerado a partir do Modelo Lógico na primeira vez; depois abre o que você editou)."],
     [null, "Mantenha o Ctrl pressionado enquanto aperta M e, em seguida, a letra."]
   ]},
   { title: "Edição de elementos", rows: [
