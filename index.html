@@ -3380,31 +3380,16 @@ function attachNodeHandlers(g, node){
         var allSelected = state.nodes.every(function(n){ return n.type === "note" || selectedNodeIds.has(n.id); });
         if (group.length >= 2 || (allSelected && group.length)){
           var withAttrs = group.filter(function(n){ return connectedAttributesOf(n).length; });
-          if (!withAttrs.length && !allSelected){
-            showToast("Nenhum dos elementos selecionados tem atributos para organizar.", "warn");
-            return;
-          }
-          showAttributeAlignMenu(withAttrs.length ? withAttrs : group, { layoutOptions: allSelected });
+          showAttributeAlignMenu(withAttrs.length ? withAttrs : group, { layoutOptions: true });
           return;
         }
       }
       selectedNodeIds = new Set([node.id]);
       selectedEdgeIds = new Set();
       render();
-      // Botão direito sobre UMA entidade: janela para criar várias entidades a partir dela
-      // (quantidade, com/sem relacionamentos, vertical/horizontal). O alinhamento de atributos
-      // continua pelos atalhos Ctrl+AE/AD/AC/AB, pelo menu com vários selecionados e pelos
-      // relacionamentos.
-      if (node.type === "entity"){
-        askCreateEntities(node);
-        return;
-      }
-      var attrs = connectedAttributesOf(node);
-      if (!attrs.length){
-        showToast(noAttrsToOrganizeMsg(node), "warn");
-        return;
-      }
-      showAttributeAlignMenu(node);
+      // O menu abre sempre (também sem atributos): ele traz o alinhamento vertical/horizontal do
+      // modelo inteiro, que não depende dos atributos nem da seleção.
+      showAttributeAlignMenu(node, { layoutOptions: true });
     });
   }
 }
@@ -4009,11 +3994,52 @@ function crossExtent(node, vertical){
   var v = verticalExtentWithAttributes(node); return { before: v.before, after: v.after };
 }
 function layoutWholeModel(vertical){
-  var entities = state.nodes.filter(function(n){ return n.type === "entity"; });
-  if (!entities.length){ showToast("Não há entidades para dispor.", "warn"); return; }
-  var connectors = state.nodes.filter(function(n){ return n.type === "relationship" || n.type === "generalization"; });
+  var allConnectors = state.nodes.filter(function(n){ return n.type === "relationship" || n.type === "generalization"; });
   var membersOf = {};
-  connectors.forEach(function(c){ membersOf[c.id] = connectorMembers(c); });
+  allConnectors.forEach(function(c){ membersOf[c.id] = connectorMembers(c); });
+  // Só objetos LIGADOS são alinhados: uma entidade ligada participa de um relacionamento/
+  // generalização com outra entidade; as soltas ficam onde estão. Cada "esquema" (grupo de
+  // entidades ligadas entre si) é alinhado separadamente, ancorado na posição da sua primeira
+  // entidade -- um esquema não é misturado nem movido junto com os outros.
+  var parent = {};
+  function find(x){ while (parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+  allConnectors.forEach(function(c){
+    var m = membersOf[c.id];
+    if (m.length < 2) return;
+    m.forEach(function(id){ if (!(id in parent)) parent[id] = id; });
+    for (var q = 1; q < m.length; q++) parent[find(m[q])] = find(m[0]);
+  });
+  var comps = {};
+  Object.keys(parent).forEach(function(id){ (comps[find(id)] = comps[find(id)] || []).push(id); });
+  var compList = Object.keys(comps).map(function(k){ return comps[k]; });
+  if (!compList.length){ showToast("Não há entidades ligadas entre si para alinhar.", "warn"); return; }
+  // Com elementos selecionados, só os esquemas que contêm algum deles; sem seleção, todos.
+  var selIds = Array.from(selectedNodeIds);
+  var selRoots = {};
+  selIds.forEach(function(id){
+    var n = getNode(id);
+    if (!n) return;
+    if (n.type === "entity" && (id in parent)) selRoots[find(id)] = true;
+    else if (n.type === "relationship" || n.type === "generalization"){
+      (membersOf[id] || []).forEach(function(m){ if (m in parent) selRoots[find(m)] = true; });
+    }
+  });
+  var useSel = Object.keys(selRoots).length > 0;
+  var count = 0;
+  compList.forEach(function(ids){
+    if (useSel && !selRoots[find(ids[0])]) return;
+    var set = {}; ids.forEach(function(id){ set[id] = true; });
+    var ents = state.nodes.filter(function(n){ return n.type === "entity" && set[n.id]; });
+    var conns = allConnectors.filter(function(c){ return membersOf[c.id].some(function(id){ return set[id]; }); });
+    layoutModelPart(vertical, ents, conns, membersOf);
+    count++;
+  });
+  pendingAdd = null;
+  render();
+  fitToContent();
+  showToast((vertical ? "Alinhamento vertical aplicado" : "Alinhamento horizontal aplicado") + (count > 1 ? " a " + count + " esquemas ligados (cada um separado)." : " ao esquema ligado.") + " Ctrl+Z desfaz.");
+}
+function layoutModelPart(vertical, entities, connectors, membersOf){
   var attrMode = vertical ? "right" : "top";
   // 1) atributos para o lado escolhido (antes de medir as extensões)
   entities.concat(connectors).forEach(function(n){
@@ -4115,10 +4141,6 @@ function layoutWholeModel(vertical){
     setAxis(c, snap(center));
     if (c.type !== "generalization" && connectedAttributesOf(c).length) alignEntityAttributes(c, vertical ? "left" : "bottom");
   });
-  pendingAdd = null;
-  render();
-  fitToContent();
-  showToast((vertical ? "Alinhamento vertical aplicado: entidades em coluna, atributos à direita." : "Alinhamento horizontal aplicado: entidades em fileira, atributos acima.") + " Ctrl+Z desfaz.");
 }
 
 function selfRelationshipPosition(entity, relDims){
@@ -4483,7 +4505,12 @@ function showAttributeAlignMenu(entity, opts){
   ["left", "right", "top", "bottom"].forEach(function(key){
     backdrop.querySelector('[data-a="' + key + '"]').addEventListener("click", function(){
       cleanup();
-      targets.forEach(function(t){ alignEntityAttributes(t, key); });
+      var anyAligned = false;
+      targets.forEach(function(t){ if (alignEntityAttributes(t, key)) anyAligned = true; });
+      if (!anyAligned){
+        showToast(targets.length === 1 ? noAttrsToOrganizeMsg(targets[0]) : "Nenhum dos elementos selecionados tem atributos para organizar.", "warn");
+        return;
+      }
       render();
       // Pedido do usuário: sem o toast "Atributos organizados." -- o reposicionamento já aparece
       // sozinho no quadro (ver applyAttributeAlignShortcut, mesmo pedido aplicado ao atalho).
@@ -7587,7 +7614,7 @@ var SHORTCUT_HELP = [
     [["Ctrl+AH"], "Alinhamento horizontal do modelo inteiro (não depende da seleção)."],
     [["Ctrl+AJ"], "Ajusta a tela (zoom) para mostrar todo o modelo, igual ao botão de ajustar tela."],
     [["Ctrl+A"], "Sozinho: aplica o próximo alinhamento da sequência a cada vez."],
-    [["Botão direito"], "Sobre o relacionamento (ou vários selecionados): abre o menu de alinhamento. Sobre uma entidade: abre a janela para criar várias entidades."]
+    [["Botão direito"], "Sobre uma entidade ou relacionamento: abre o menu de alinhamento de atributos e de alinhamento vertical/horizontal do modelo."]
   ]},
   { title: "Mouse e quadro", rows: [
     [["Roda do mouse"], "Aproxima ou afasta o zoom."],
