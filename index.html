@@ -6835,19 +6835,41 @@ function convertLogicalToConceptual(logical){
 }
 
 /* ---------- projeto: novo / abrir / baixar ---------- */
+// Depois de "Novo projeto"/"Abrir projeto", continua na mesma visão em que o usuário estava
+// (Conceitual, Lógico, Físico ou Dicionário de Dados), já atualizada com o projeto novo.
+function captureViewForReload(){ return { mode: mode, physical: physicalActive, dict: dictActive }; }
+function restoreViewAfterReload(prev){
+  if (!prev || (!prev.physical && !prev.dict && prev.mode === "conceptual")) return;
+  if (!logicalModel) logicalModel = convertConceptualToLogical(conceptualModel);
+  if (prev.dict){
+    mode = prev.mode === "logical" ? "logical" : mode;
+    enterDictionaryView(false);
+  } else if (prev.physical){
+    enterPhysicalView();
+  } else if (prev.mode === "logical"){
+    switchMode("logical", true);
+  }
+  scheduleAutosave();
+}
 async function doNewProject(){
   var ok = await askConfirm("Novo projeto", "Isso substitui o diagrama atual nesta janela — incluindo o modelo lógico já convertido, se houver (ele continua salvo neste navegador até ser sobrescrito). Deseja continuar?", "Criar novo", false);
   if (!ok) return;
+  var prevView = captureViewForReload();
   mode = "conceptual";
   conceptualModel = freshState("Novo Modelo Conceitual");
   logicalModel = null;
+  physicalSql = ""; dictionaryRows = null;      // SQL e Dicionário de Dados do projeto anterior não valem para o novo
+  physicalActive = false; dictActive = false;   // volta ao quadro (as visões Física/Dicionário não são salvas)
   state = conceptualModel;
   projectNameInput.value = state.projectName;
   selectedNodeIds.clear(); selectedEdgeIds.clear(); connectMode = false; connectFrom = null; connectSticky = false; pendingAdd = null;
   resetUndoHistory();
   applyModeUI();
   render();
+  renderPhysicalSql(); renderDictionaryView();
   fitToContent();
+  scheduleAutosave();
+  restoreViewAfterReload(prevView);
   showToast("Novo projeto criado.");
 }
 document.getElementById("projMenuNew").addEventListener("click", function(){
@@ -6919,6 +6941,7 @@ document.getElementById("fileInput").addEventListener("change", function(e){
     }
     var ok = await askConfirm("Abrir projeto", 'Isso substitui o diagrama atual por "' + (parsed.projectName || file.name) + '". Deseja continuar?', "Abrir", false);
     if (!ok) return;
+    var prevViewOpen = captureViewForReload();
     if (isNewFormat){
       applyLoadedProject(parsed);
     } else {
@@ -6926,13 +6949,18 @@ document.getElementById("fileInput").addEventListener("change", function(e){
       conceptualModel = normalizeLoadedState(parsed);
       logicalModel = null;
       state = conceptualModel;
+      physicalSql = ""; dictionaryRows = null;
     }
+    physicalActive = false; dictActive = false;   // abre no quadro do modelo do projeto carregado
     projectNameInput.value = state.projectName;
     selectedNodeIds.clear(); selectedEdgeIds.clear(); connectMode = false; connectFrom = null; connectSticky = false; pendingAdd = null;
     resetUndoHistory();
     applyModeUI();
     render();
+    renderPhysicalSql(); renderDictionaryView();
     fitToContent();
+    scheduleAutosave();
+    restoreViewAfterReload(prevViewOpen);
     showToast("Projeto carregado: " + state.projectName);
   };
   reader.readAsText(file);
@@ -7409,22 +7437,30 @@ function dictionaryRowsAsMatrix(rows){
 }
 // Gera as linhas do dicionário a partir do modelo lógico, reaproveitando a Descrição que o usuário já
 // tinha escrito para a mesma tabela+coluna (a tabela continua em branco nas linhas seguintes).
-function generateDictionaryRows(){
+function generateDictionaryRows(fromScratch){
+  var fresh = dictionaryRowsAsMatrix(buildDictionaryRows(logicalModel));
+  if (fromScratch || !dictionaryRows || !dictionaryRows.length) return fresh;
+  // Regerar: reflete o modelo lógico atual, mas reaproveita a Descrição já escrita (tabela+coluna) e
+  // mantém, no fim, as tabelas que o usuário criou à mão e que não existem no modelo lógico.
   var old = {};
-  if (dictionaryRows){
-    var curTable = "";
-    dictionaryRows.forEach(function(r){
-      if (r[0]) curTable = r[0];
-      if (r[4]) old[curTable + "\u0001" + r[1]] = r[4];
-    });
-  }
+  var curTable = "";
+  dictionaryRows.forEach(function(r){
+    if (r[0]) curTable = r[0];
+    if (r[4]) old[curTable + "\u0001" + r[1]] = r[4];
+  });
   var curT = "";
-  return dictionaryRowsAsMatrix(buildDictionaryRows(logicalModel)).map(function(r){
-    if (r[0]) curT = r[0];
+  var names = {};
+  fresh.forEach(function(r){
+    if (r[0]){ curT = r[0]; names[r[0]] = true; }
     var keep = old[curT + "\u0001" + r[1]];
     if (keep && !r[4]) r[4] = keep;
-    return r;
   });
+  var manual = [], inManual = false;
+  dictionaryRows.forEach(function(r){
+    if (r[0]) inManual = !names[r[0]];
+    if (inManual) manual.push(r.slice());
+  });
+  return fresh.concat(manual);
 }
 // Os dados são uma lista única de linhas; cada tabela do modelo lógico vira um grupo (começa numa
 // linha com o nome da tabela preenchido) e é desenhada como uma tabela separada.
@@ -7500,15 +7536,13 @@ document.getElementById("dictScroll").addEventListener("click", function(e){
   scheduleAutosave();
   renderDictionaryView();
 });
-// regenerate: refaz o dicionário a partir do modelo lógico (item "Gerar Dicionário de Dados");
-// sem ele, abre o que já existe (editado/salvo) e só gera na primeira vez.
-function enterDictionaryView(regenerate){
+function enterDictionaryView(fromScratch){
   if (!logicalModel){
     logicalModel = convertConceptualToLogical(conceptualModel);
   }
-  if (regenerate || !dictionaryRows){
-    dictionaryRows = generateDictionaryRows();
-  }
+  // "Dicionário de Dados" (fromScratch=false): regera a partir do modelo lógico, mantendo Descrições
+  // e tabelas manuais. "Gerar Dicionário de Dados" (true): novo, do zero, descartando tudo.
+  dictionaryRows = generateDictionaryRows(!!fromScratch);
   scheduleAutosave();
   physicalActive = false;
   dictActive = true;
@@ -7841,7 +7875,7 @@ var SHORTCUT_HELP = [
     [["Ctrl+MC"], "Vai para o Modelo Conceitual."],
     [["Ctrl+ML"], "Vai para o Modelo Lógico."],
     [["Ctrl+MF"], "Vai para o Modelo Físico (SQL)."],
-    [["Ctrl+DD"], "Vai para o Dicionário de Dados (gerado a partir do Modelo Lógico na primeira vez; depois abre o que você editou)."],
+    [["Ctrl+DD"], "Abre o Dicionário de Dados, regerado a partir do Modelo Lógico (mantém as Descrições e as tabelas criadas à mão). \"Gerar Dicionário de Dados\" no menu cria um novo do zero."],
     [null, "Mantenha o Ctrl pressionado enquanto aperta M e, em seguida, a letra."]
   ]},
   { title: "Edição de elementos", rows: [
