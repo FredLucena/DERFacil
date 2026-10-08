@@ -7541,8 +7541,8 @@ function dictionaryRowsAsMatrix(rows){
 }
 // Gera as linhas do dicionário a partir do modelo lógico, reaproveitando a Descrição que o usuário já
 // tinha escrito para a mesma tabela+coluna (a tabela continua em branco nas linhas seguintes).
-function generateDictionaryRows(fromScratch){
-  var fresh = dictionaryRowsAsMatrix(buildDictionaryRows(logicalModel));
+function generateDictionaryRows(fromScratch, srcLogical){
+  var fresh = dictionaryRowsAsMatrix(buildDictionaryRows(srcLogical || logicalModel));
   if (fromScratch || !dictionaryRows || !dictionaryRows.length) return fresh;
   // Regerar: reflete o modelo lógico atual, mas reaproveita a Descrição já escrita (tabela+coluna) e
   // mantém, no fim, as tabelas que o usuário criou à mão e que não existem no modelo lógico.
@@ -7640,13 +7640,20 @@ document.getElementById("dictScroll").addEventListener("click", function(e){
   scheduleAutosave();
   renderDictionaryView();
 });
-function enterDictionaryView(fromScratch){
+function enterDictionaryView(fromScratch, srcLogical, onlyShow){
   if (!logicalModel){
     logicalModel = convertConceptualToLogical(conceptualModel);
   }
+  // Item base "Dicionário de Dados": só POSICIONA na tela do dicionário já existente (com as edições),
+  // sem gerar nada; se ainda não existe dicionário, gera o primeiro.
+  if (onlyShow && dictionaryRows && dictionaryRows.length){
+    physicalActive = false; dictActive = true;
+    applyModeUI(); renderDictionaryView();
+    return;
+  }
   // "Dicionário de Dados" (fromScratch=false): regera a partir do modelo lógico, mantendo Descrições
   // e tabelas manuais. "Gerar Dicionário de Dados" (true): novo, do zero, descartando tudo.
-  dictionaryRows = generateDictionaryRows(!!fromScratch);
+  dictionaryRows = generateDictionaryRows(!!fromScratch, srcLogical);
   scheduleAutosave();
   physicalActive = false;
   dictActive = true;
@@ -7701,7 +7708,7 @@ function exitPhysicalView(target, force){
 // modo pedido já era o atual -- ver o comentário em switchMode). Trocar de modelo por aqui nunca
 // mostra diálogo de confirmação (ver switchMode/enterPhysicalView, acima).
 function goToMode(target, force){
-  if (target === "dictionary") enterDictionaryView(false);
+  if (target === "dictionary") enterDictionaryView(false, null, true);
   else if (target === "physical") enterPhysicalView();
   else exitPhysicalView(target === "logical" ? "logical" : "conceptual", force);
 }
@@ -7783,7 +7790,13 @@ function physicalSqlFromDictionary(rows){
   return generateSqlFromLogicalModel({ nodes: tables });
 }
 function generateMode(target){
-  if (target === "dictionary"){ enterDictionaryView(true); return; }
+  if (target === "dictionary"){
+    // Estando no Modelo Físico, o dicionário novo sai do SQL que está na tela (sem mexer no modelo lógico).
+    var dictSrc = physicalActive ? parseSqlToLogicalModel(physicalSql, logicalModel, state && state.projectName) : null;
+    enterDictionaryView(true, dictSrc);
+    if (dictSrc) showToast("Dicionário de Dados gerado a partir do SQL do Modelo Físico.");
+    return;
+  }
   if (target === "logical"){
     var previousLogicalModel = logicalModel;
     // Pedido do usuário: "quando da geração do modelo lógico a partir do modelo físico, os tipos
@@ -7794,6 +7807,16 @@ function generateMode(target){
     // Pedido do usuário: estando no Modelo Físico, "Gerar Modelo Lógico" monta o lógico a partir do
     // próprio SQL (engenharia reversa); só se o SQL não tiver nenhum CREATE TABLE reconhecível
     // volta a gerar a partir do conceitual, avisando.
+    // Estando no Dicionário de Dados, o lógico sai do que está no dicionário (inclusive edições).
+    var dictSql = dictActive && dictionaryRows && dictionaryRows.length ? physicalSqlFromDictionary(dictionaryRows) : "";
+    var fromDict = dictSql ? parseSqlToLogicalModel(dictSql, previousLogicalModel, (state && state.projectName) || (conceptualModel && conceptualModel.projectName)) : null;
+    if (fromDict){
+      logicalModel = fromDict;
+      scheduleAutosave();
+      showToast("Modelo lógico gerado a partir do Dicionário de Dados (" + fromDict.nodes.length + (fromDict.nodes.length === 1 ? " tabela)." : " tabelas)."));
+      goToMode(target, true);
+      return;
+    }
     var fromSql = physicalActive ? parseSqlToLogicalModel(physicalSql, previousLogicalModel, (state && state.projectName) || (conceptualModel && conceptualModel.projectName)) : null;
     if (fromSql){
       logicalModel = fromSql;
@@ -7845,8 +7868,9 @@ var MODE_BASE_ITEMS = [
 ];
 var MODE_EXTRA_ITEMS_BY_CURRENT = {
   conceptual: [ { key:"logical", label:"Gerar Modelo Lógico" } ],
-  logical: [ { key:"dictionary", label:"Gerar Dicionário de Dados" }, { key:"conceptual", label:"Gerar Modelo Conceitual" }, { key:"physical", label:"Gerar Modelo Físico" } ],
-  physical: [ { key:"logical", label:"Gerar Modelo Lógico" } ]
+  logical: [ { key:"conceptual", label:"Gerar Modelo Conceitual" }, { key:"physical", label:"Gerar Modelo Físico" }, { key:"dictionary", label:"Gerar Dicionário de Dados" } ],
+  physical: [ { key:"logical", label:"Gerar Modelo Lógico" }, { key:"dictionary", label:"Gerar Dicionário de Dados" } ],
+  dictionary: [ { key:"conceptual", label:"Gerar Modelo Conceitual" }, { key:"logical", label:"Gerar Modelo Lógico" }, { key:"physical", label:"Gerar Modelo Físico" }, { key:"dictionary", label:"Gerar Dicionário de Dados" } ]
 };
 var modeMenuWrap = document.getElementById("modeMenuWrap");
 var modeMenu = document.getElementById("modeMenu");
@@ -7875,7 +7899,7 @@ function modeMenuItemHtml(item, isActive, kind){
 function renderModeMenuPanel(){
   var current = dictActive ? "dictionary" : (physicalActive ? "physical" : mode);
   var baseHtml = MODE_BASE_ITEMS.map(function(item){ return modeMenuItemHtml(item, item.key === current, "base"); }).join("");
-  var extraHtml = (MODE_EXTRA_ITEMS_BY_CURRENT[current === "dictionary" ? "logical" : current] || []).map(function(item){ return modeMenuItemHtml(item, false, "extra"); }).join("");
+  var extraHtml = (MODE_EXTRA_ITEMS_BY_CURRENT[current] || []).map(function(item){ return modeMenuItemHtml(item, false, "extra"); }).join("");
   modeMenuPanel.innerHTML = baseHtml + '<hr class="dl-menu-divider">' + extraHtml;
 }
 function closeModeMenu(){
