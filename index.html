@@ -2434,6 +2434,96 @@ function parsePhysicalSqlColumnEdits(sql){
   return result;
 }
 
+
+// Modelo Físico -> Modelo Lógico (engenharia reversa do SQL): monta as tabelas do lógico a partir
+// do texto do SQL (CREATE TABLE ... com colunas, PRIMARY KEY, FOREIGN KEY ... REFERENCES). Mesmo
+// parser por linha de parsePhysicalSqlColumnEdits (formato gerado por generateSqlFromLogicalModel);
+// o que não for reconhecido é ignorado. Tabelas que já existiam (mesmo nome) mantêm a posição no
+// quadro. Retorna null se o SQL não tiver nenhum CREATE TABLE reconhecível.
+function parseSqlToLogicalModel(sql, oldLogical, projectName){
+  if (!sql || !String(sql).trim()) return null;
+  var lines = String(sql).split("\n");
+  var CREATE_RE = /^\s*CREATE\s+TABLE\s+("(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*$/i;
+  var CLOSE_RE = /^\s*\)\s*;?\s*$/;
+  var IDENT = '("(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_]*)';
+  var PK_RE = /^PRIMARY\s+KEY\s*\(([^)]*)\)/i;
+  var FK_RE = new RegExp("^FOREIGN\\s+KEY\\s*\\(([^)]*)\\)\\s*REFERENCES\\s+" + IDENT + "\\s*(?:\\(([^)]*)\\))?", "i");
+  var INLINE_FK_RE = new RegExp("\\bREFERENCES\\s+" + IDENT + "\\s*(?:\\(([^)]*)\\))?", "i");
+  var tables = [], cur = null, fks = [];
+  var oldByName = {};
+  if (oldLogical && Array.isArray(oldLogical.nodes)) oldLogical.nodes.forEach(function(n){ if (n.type === "table") oldByName[String(n.name).toLowerCase()] = n; });
+  function names(list){ return String(list || "").split(",").map(function(x){ return unquoteSqlIdent(x); }).filter(Boolean); }
+  for (var li = 0; li < lines.length; li++){
+    var raw = lines[li];
+    if (!cur){
+      var mc = CREATE_RE.exec(raw);
+      if (mc){
+        var tname = unquoteSqlIdent(mc[1]);
+        var old = oldByName[tname.toLowerCase()];
+        var idx = tables.length;
+        cur = { id: uid("nd"), type:"table", name: tname,
+          x: old ? old.x : 200 + (idx % 3) * 340, y: old ? old.y : 160 + Math.floor(idx / 3) * 280, columns: [] };
+        tables.push(cur);
+      }
+      continue;
+    }
+    if (CLOSE_RE.test(raw)){ cur = null; continue; }
+    var parts = splitLineComment(raw);
+    var code = parts.code.trim().replace(/,\s*$/, "").trim().replace(/^CONSTRAINT\s+\S+\s+/i, "");
+    if (!code) continue;
+    var mpk = PK_RE.exec(code);
+    if (mpk){ names(mpk[1]).forEach(function(n){ cur.columns.forEach(function(c){ if (c.name === n) c.pk = true; }); }); continue; }
+    var mfk = FK_RE.exec(code);
+    if (mfk){ fks.push({ table: cur, cols: names(mfk[1]), refTable: unquoteSqlIdent(mfk[2]), refCols: names(mfk[3]) }); continue; }
+    if (/^(UNIQUE|CHECK|INDEX|KEY)\b/i.test(code)) continue;
+    var mCol = SQL_COLUMN_DEF_RE.exec(code);
+    if (!mCol) continue;
+    var rest = mCol[4] || "";
+    var col = { name: unquoteSqlIdent(mCol[1]), dataType: mCol[2], dataSize: "", dataDecimals: "", pk:false, fk:false, fkTable:null, fkColumn:null, cardChild:null, cardParent:null, constraints: [] };
+    var sizeParts = mCol[3] ? splitTopLevel(mCol[3], ",").map(function(x){ return x.trim(); }) : [];
+    col.dataSize = sizeParts[0] || ""; col.dataDecimals = sizeParts[1] || "";
+    if (/\bPRIMARY\s+KEY\b/i.test(rest)){ col.pk = true; rest = rest.replace(/\bPRIMARY\s+KEY\b/i, " "); }
+    var mi = INLINE_FK_RE.exec(rest);
+    if (mi){ fks.push({ table: cur, cols: [col.name], refTable: unquoteSqlIdent(mi[1]), refCols: names(mi[2]) }); rest = rest.replace(INLINE_FK_RE, " "); }
+    col.constraints = parseInlineConstraints(rest.trim()).concat(parseTrailingCommentConstraints(parts.comment));
+    cur.columns.push(col);
+  }
+  if (!tables.length) return null;
+  var byLower = {};
+  tables.forEach(function(t){ byLower[t.name.toLowerCase()] = t; });
+  fks.forEach(function(fk){
+    var target = byLower[fk.refTable.toLowerCase()];
+    if (!target) return;
+    fk.cols.forEach(function(cn, i){
+      var c = fk.table.columns.filter(function(x){ return x.name === cn; })[0];
+      if (!c) return;
+      var refName = fk.refCols[i] || (target.columns.filter(function(x){ return x.pk; })[i] || {}).name || "";
+      c.fk = true; c.fkTable = target.id; c.fkColumn = refName || null;
+      // Cardinalidades: o SQL não as guarda; reaproveita as do modelo lógico anterior (mesma
+      // tabela/coluna/destino) e, senão, deduz do SQL: NOT NULL (ou PK) => lado pai mínimo 1;
+      // coluna UNIQUE ou PK sozinha => no máximo 1 filho por pai.
+      var oldT = oldByName[fk.table.name.toLowerCase()];
+      var oldC = oldT && (oldT.columns || []).filter(function(x){ return x.name === cn && x.fk; })[0];
+      var oldTarget = oldC && oldLogical.nodes.filter(function(n){ return n.id === oldC.fkTable; })[0];
+      if (oldC && oldTarget && String(oldTarget.name).toLowerCase() === target.name.toLowerCase() && oldC.cardChild && oldC.cardParent){
+        c.cardChild = { min: oldC.cardChild.min, max: oldC.cardChild.max };
+        c.cardParent = { min: oldC.cardParent.min, max: oldC.cardParent.max };
+      } else {
+        var cn_ = (c.constraints || []).map(function(k){ return k.name; });
+        var notNull = c.pk || cn_.indexOf("NOT NULL") >= 0;
+        var pkCount = fk.table.columns.filter(function(x){ return x.pk; }).length;
+        var single = cn_.indexOf("UNIQUE") >= 0 || (c.pk && pkCount === 1);
+        c.cardParent = { min: notNull ? "1" : "0", max: "1" };
+        c.cardChild = { min: "0", max: single ? "1" : "N" };
+      }
+    });
+  });
+  var logical = freshLogicalState(projectName);
+  logical.nodes = tables;
+  logical.nextIds.table = tables.length + 1;
+  return logical;
+}
+
 // Sincroniza a caixa de SQL do Modelo Físico com `physicalSql` (chamada ao entrar na visão --
 // ver enterPhysicalView). A caixa é editável pelo usuário (ver o listener "input" em #sqlOutput);
 // esta função só empurra `physicalSql` para a tela, nunca o contrário.
@@ -4119,18 +4209,32 @@ function layoutModelPart(vertical, entities, connectors, membersOf){
   setCross(first, base);
   setAxis(first, snap(vertical ? first.y : first.x));
   var PLAIN_GAP = 90;
+  // Distância ENTRE AS FORMAS (borda da entidade até a borda do losango) igual em todos os pares:
+  // a folga necessária para os atributos de cada lado não colidirem é calculada por par e vale a
+  // MAIOR delas para todos -- antes, cada par usava a sua (atributos largos => vão maior).
+  var halfOf = function(n){ var d = computeDims(n); return (vertical ? d.h : d.w) / 2; };
+  var overBefore = function(n){ return Math.max(0, axisExtent(n, vertical).before - halfOf(n)); };
+  var overAfter = function(n){ return Math.max(0, axisExtent(n, vertical).after - halfOf(n)); };
+  var D = CHAIN_GAP;
+  for (var q2 = 1; q2 < ordered.length; q2++){
+    var g2 = gapConn[q2 - 1];
+    if (!g2) continue;
+    D = Math.max(D, CHAIN_GAP + overAfter(ordered[q2 - 1]) + overBefore(g2), CHAIN_GAP + overAfter(g2) + overBefore(ordered[q2]));
+  }
   for (var k = 1; k < ordered.length; k++){
     var prev = ordered[k - 1], cur = ordered[k], gc = gapConn[k - 1];
-    var gapSize = PLAIN_GAP;
-    if (gc){ var ge = axisExtent(gc, vertical); gapSize = CHAIN_GAP + ge.before + ge.after + CHAIN_GAP; }
     var prevPos = vertical ? prev.y : prev.x;
-    var target = snap(prevPos + axisExtent(prev, vertical).after + gapSize + axisExtent(cur, vertical).before);
-    setCross(cur, base);
-    setAxis(cur, target);
     if (gc){
-      var gStart = prevPos + axisExtent(prev, vertical).after + CHAIN_GAP;
+      var gcPos = prevPos + halfOf(prev) + D + halfOf(gc);   // sem snap: a distância uniforme vale mais que a grade
+      var target = gcPos + halfOf(gc) + D + halfOf(cur);
       setCross(gc, base);
-      setAxis(gc, gStart + axisExtent(gc, vertical).before);
+      setAxis(gc, gcPos);
+      setCross(cur, base);
+      setAxis(cur, target);
+    } else {
+      var target2 = snap(prevPos + axisExtent(prev, vertical).after + PLAIN_GAP + axisExtent(cur, vertical).before);
+      setCross(cur, base);
+      setAxis(cur, target2);
     }
   }
   // 5) faixa lateral para os demais conectores
@@ -7633,6 +7737,51 @@ function goToMode(target, force){
 // alcançado a partir do Físico quando `mode` já era "logical": sem ele, exitPhysicalView achava
 // que "nada mudou" (target === mode) e não religava `state` ao logicalModel recém-substituído
 // acima, deixando o quadro mostrando o modelo antigo mesmo com logicalModel já correto por baixo.
+// Pedido do usuário: estando no Dicionário de Dados, "Gerar Modelo Físico" usa o que está na tela
+// (inclusive as edições feitas à mão no dicionário). Monta um modelo lógico temporário a partir das
+// linhas (Tabela / Coluna / Tipo / Restrições / Descrição / Tabela Relacionada) e reaproveita o
+// gerador de SQL; o modelo lógico do projeto não é alterado.
+function physicalSqlFromDictionary(rows){
+  if (!rows || !rows.length) return "";
+  var tables = [], cur = null, nid = 0;
+  rows.forEach(function(r){
+    var tn = String(r[0] || "").trim();
+    if (tn){ cur = { id: "dt" + (++nid), type:"table", name: tn, columns: [], _fkRel: [] }; tables.push(cur); }
+    if (!cur) return;
+    var cn = String(r[1] || "").trim();
+    if (!cn) return;
+    var mt = /^\s*([A-Za-z_][A-Za-z0-9_ ]*?)\s*(?:\(([^)]*)\))?\s*$/.exec(String(r[2] || "").trim());
+    var sizeParts = mt && mt[2] ? mt[2].split(",").map(function(x){ return x.trim(); }) : [];
+    var col = { name: cn, dataType: mt ? mt[1].trim() : String(r[2] || "").trim(), dataSize: sizeParts[0] || "", dataDecimals: sizeParts[1] || "",
+      pk:false, fk:false, fkTable:null, fkColumn:null, constraints: [] };
+    var other = [];
+    String(r[3] || "").split("\n").forEach(function(line){
+      var t = line.trim();
+      if (!t) return;
+      if (/^PK$/i.test(t)) col.pk = true;
+      else if (/^FK$/i.test(t)) col.fk = true;
+      else if (/^NULL$/i.test(t)) return;
+      else other.push(t.replace(/^CHECK\(/i, "CHECK ("));
+    });
+    col.constraints = parseInlineConstraints(other.join(" "));
+    if (col.pk && !col.constraints.some(function(k){ return k.name === "NOT NULL"; })) col.constraints.unshift({ name:"NOT NULL", p1:"", p2:"" });
+    if (col.fk){
+      var mr = /^\s*([^()\n]+?)\s*\(([^)]*)\)/.exec(String(r[5] || "").split("\n")[0] || "");
+      if (mr) cur._fkRel.push({ col: col, table: mr[1].trim(), column: mr[2].trim() });
+    }
+    cur.columns.push(col);
+  });
+  var byName = {};
+  tables.forEach(function(t){ byName[t.name.toLowerCase()] = t; });
+  tables.forEach(function(t){
+    t._fkRel.forEach(function(f){
+      var target = byName[f.table.toLowerCase()];
+      if (target){ f.col.fkTable = target.id; f.col.fkColumn = f.column; } else f.col.fk = false;
+    });
+    t.columns.forEach(function(c){ if (c.fk && !c.fkTable) c.fk = false; });
+  });
+  return generateSqlFromLogicalModel({ nodes: tables });
+}
 function generateMode(target){
   if (target === "dictionary"){ enterDictionaryView(true); return; }
   if (target === "logical"){
@@ -7642,17 +7791,34 @@ function generateMode(target){
     // pedido) quando a tela atual É a Física (physicalActive); nos demais casos (ex.: a partir da
     // Conceitual) não há SQL nenhum na jogada, e o comportamento continua sendo reaproveitar do
     // modelo lógico anterior, como antes.
+    // Pedido do usuário: estando no Modelo Físico, "Gerar Modelo Lógico" monta o lógico a partir do
+    // próprio SQL (engenharia reversa); só se o SQL não tiver nenhum CREATE TABLE reconhecível
+    // volta a gerar a partir do conceitual, avisando.
+    var fromSql = physicalActive ? parseSqlToLogicalModel(physicalSql, previousLogicalModel, (state && state.projectName) || (conceptualModel && conceptualModel.projectName)) : null;
+    if (fromSql){
+      logicalModel = fromSql;
+      scheduleAutosave();
+      showToast("Modelo lógico gerado a partir do SQL do Modelo Físico (" + fromSql.nodes.length + (fromSql.nodes.length === 1 ? " tabela)." : " tabelas)."));
+      goToMode(target, true);
+      return;
+    }
     var sqlEdits = physicalActive ? parsePhysicalSqlColumnEdits(physicalSql) : null;
     logicalModel = convertConceptualToLogical(conceptualModel);
     preserveLogicalColumnEditsAcrossRegeneration(previousLogicalModel, logicalModel, sqlEdits);
     showToast(physicalActive
-      ? "Modelo lógico gerado a partir do diagrama conceitual atual (tipo de dado e restrições extraídos do SQL do Modelo Físico, quando a coluna correspondente existe lá)."
+      ? "O SQL do Modelo Físico não tem nenhum CREATE TABLE reconhecível — o modelo lógico foi gerado a partir do diagrama conceitual."
       : "Modelo lógico gerado a partir do diagrama conceitual atual (tipo de dado e restrições já ajustados foram preservados quando a tabela/coluna correspondente ainda existe).");
   } else if (target === "conceptual"){
     conceptualModel = convertLogicalToConceptual(logicalModel);
     showToast("Modelo conceitual gerado a partir das tabelas do modelo lógico (engenharia reversa).");
   } else if (target === "physical"){
-    physicalSql = generateSqlFromLogicalModel(logicalModel);
+    var fromDict = dictActive && dictionaryRows && dictionaryRows.length ? physicalSqlFromDictionary(dictionaryRows) : "";
+    if (fromDict){
+      physicalSql = fromDict;
+      showToast("Modelo físico (SQL) gerado a partir do Dicionário de Dados.");
+    } else {
+      physicalSql = generateSqlFromLogicalModel(logicalModel);
+    }
     scheduleAutosave();
   }
   goToMode(target, true);
