@@ -4297,6 +4297,13 @@ function placeSelfRelationshipOnEntity(entity){
   showToast('Autorrelacionamento criado em "' + (entity.name || "") + '" — dê um nome ao relacionamento e selecione cada linha para definir o papel e a cardinalidade.');
 }
 
+// Pedido do usuário: renomear uma entidade/relacionamento muda a largura da forma, e os atributos já
+// alinhados (acima/abaixo -- cada um num X da borda) ficavam inclinados. Reaplica o mesmo arranjo.
+function realignAttributesAfterRename(n){
+  if (!n || (n.type !== "entity" && n.type !== "relationship")) return;
+  if (!n.attrAlignMode || !connectedAttributesOf(n).length) return;
+  alignEntityAttributes(n, n.attrAlignMode);
+}
 function placeAttributeOnNode(target, kind, stickyAdd, keepTargetSelected, isKey){
   var targetDims = computeDims(target);
   var targetCx = centerX(target, targetDims);
@@ -5261,6 +5268,7 @@ document.addEventListener("keydown", function(e){
     if (typedNode && typedNode.type !== "note"){
       e.preventDefault();
       typedNode.name = e.key;
+      realignAttributesAfterRename(typedNode);
       render();
       var nameFieldId = typedNode.type === "table" ? "pf-table-name" : "pf-name";
       var nameField = document.getElementById(nameFieldId);
@@ -5940,7 +5948,7 @@ function updatePanel(){
     html += '<button class="danger-btn" id="pf-delete">Excluir elemento</button>';
     panelEl.innerHTML = html;
 
-    document.getElementById("pf-name").addEventListener("input", function(e){ n.name = e.target.value; render(); document.getElementById("pf-name").focus(); document.getElementById("pf-name").setSelectionRange(e.target.value.length, e.target.value.length); });
+    document.getElementById("pf-name").addEventListener("input", function(e){ n.name = e.target.value; realignAttributesAfterRename(n); render(); document.getElementById("pf-name").focus(); document.getElementById("pf-name").setSelectionRange(e.target.value.length, e.target.value.length); });
     if (n.type === "entity") document.getElementById("pf-weak").addEventListener("change", function(e){ n.weak = e.target.checked; render(); });
     if (n.type === "attribute"){
       document.getElementById("pf-key").addEventListener("change", function(e){ n.isKey = e.target.checked; render(); });
@@ -7462,10 +7470,8 @@ function switchMode(target, force){
     }
     // se já existe um modelo lógico, abre ele exatamente como está -- sem perguntar, sem regenerar.
   } else if (target === "conceptual"){
-    if (!conceptualModel.nodes.length){
-      conceptualModel = convertLogicalToConceptual(logicalModel);
-      showToast('Modelo conceitual gerado automaticamente a partir das tabelas do modelo lógico (engenharia reversa) — os dois ficam guardados separadamente a partir de agora, então alternar entre eles não apaga suas edições.');
-    }
+    // Pedido do usuário: posicionar no Modelo Conceitual NÃO gera nada; se ele estiver vazio, abre vazio.
+    // O conceitual só nasce da engenharia reversa pelo item "Gerar Modelo Conceitual" (generateMode).
     // se já existe um diagrama conceitual, abre ele exatamente como está -- sem perguntar, sem regenerar.
   }
   mode = target;
@@ -7508,7 +7514,6 @@ function buildDictionaryRows(logical){
         if (!clause) return;
         var txt = clause.inline ? clause.inline.replace(/^CHECK \(/, "CHECK(") : clause.comment;
         if (clause.inline === "NOT NULL") hasNotNull = true;
-        if (c.pk && clause.inline === "NOT NULL") return; // PK já implica NOT NULL
         cons.push(txt);
       });
       if (!hasNotNull) cons.push("NULL");
@@ -7833,7 +7838,12 @@ function generateMode(target){
       : "Modelo lógico gerado a partir do diagrama conceitual atual (tipo de dado e restrições já ajustados foram preservados quando a tabela/coluna correspondente ainda existe).");
   } else if (target === "conceptual"){
     conceptualModel = convertLogicalToConceptual(logicalModel);
-    showToast("Modelo conceitual gerado a partir das tabelas do modelo lógico (engenharia reversa).");
+    // Pedido do usuário: o conceitual recém-gerado já nasce com alinhamento horizontal (como Ctrl+AH).
+    goToMode(target, true);
+    selectedNodeIds.clear(); selectedEdgeIds.clear();
+    layoutWholeModel(false);
+    showToast("Modelo conceitual gerado a partir do modelo lógico, com alinhamento horizontal. Ctrl+Z desfaz o alinhamento.");
+    return;
   } else if (target === "physical"){
     var fromDict = dictActive && dictionaryRows && dictionaryRows.length ? physicalSqlFromDictionary(dictionaryRows) : "";
     if (fromDict){
