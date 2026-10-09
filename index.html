@@ -2462,7 +2462,7 @@ function parseSqlToLogicalModel(sql, oldLogical, projectName){
         var old = oldByName[tname.toLowerCase()];
         var idx = tables.length;
         cur = { id: uid("nd"), type:"table", name: tname,
-          x: old ? old.x : 200 + (idx % 3) * 340, y: old ? old.y : 160 + Math.floor(idx / 3) * 280, columns: [] };
+          x: old ? old.x : 200 + (idx % 3) * 340, y: old ? old.y : 160 + Math.floor(idx / 3) * 280, columns: [], _hadPos: !!old };
         tables.push(cur);
       }
       continue;
@@ -2518,6 +2518,50 @@ function parseSqlToLogicalModel(sql, oldLogical, projectName){
       }
     });
   });
+  // Ordem de ligação (ex.: Pedido, Pedido_Produto, Produto): em cada grupo de tabelas ligadas por FK,
+  // começa por uma ponta (tabela com uma só ligação, a primeira na ordem do SQL) e segue as ligações,
+  // então a tabela do meio (associativa) fica entre as duas que ela liga. Só as tabelas NOVAS são
+  // reposicionadas (as que já existiam no lógico anterior mantêm o lugar); linhas de até 4 tabelas.
+  var adj = {};
+  tables.forEach(function(t){ adj[t.id] = []; });
+  tables.forEach(function(t){
+    t.columns.forEach(function(c){
+      if (c.fk && c.fkTable && c.fkTable !== t.id && adj[c.fkTable]){
+        if (adj[t.id].indexOf(c.fkTable) === -1) adj[t.id].push(c.fkTable);
+        if (adj[c.fkTable].indexOf(t.id) === -1) adj[c.fkTable].push(t.id);
+      }
+    });
+  });
+  var byIdT = {}; tables.forEach(function(t){ byIdT[t.id] = t; });
+  var seen = {}, order = [];
+  function visit(startId){
+    var stack = [startId];
+    while (stack.length){
+      var id = stack.pop();
+      if (seen[id]) continue;
+      seen[id] = true; order.push(byIdT[id]);
+      adj[id].slice().sort(function(a, b){ return tables.indexOf(byIdT[b]) - tables.indexOf(byIdT[a]); })
+        .forEach(function(n){ if (!seen[n]) stack.push(n); });
+    }
+  }
+  tables.forEach(function(t){
+    if (seen[t.id]) return;
+    // componente de t: escolhe a ponta (grau 1) mais cedo no SQL; sem ponta, a própria t
+    var comp = [], q = [t.id], mark = {};
+    while (q.length){ var x = q.pop(); if (mark[x]) continue; mark[x] = true; comp.push(x); adj[x].forEach(function(n){ q.push(n); }); }
+    var ends = tables.filter(function(u){ return mark[u.id] && adj[u.id].length === 1; });
+    // desempate entre pontas: a que aparece primeiro no nome da tabela vizinha (Pedido em Pedido_Produto), depois a ordem do SQL
+    var posIn = function(u){ var nb = byIdT[adj[u.id][0]]; var i = nb ? nb.name.toLowerCase().indexOf(u.name.toLowerCase()) : -1; return i < 0 ? 1e9 : i; };
+    ends.sort(function(a, b){ return (posIn(a) - posIn(b)) || (tables.indexOf(a) - tables.indexOf(b)); });
+    visit((ends[0] || t).id);
+  });
+  var slot = 0;
+  order.forEach(function(t){
+    if (!t._hadPos){ t.x = 200 + (slot % 4) * 340; t.y = 160 + Math.floor(slot / 4) * 280; }
+    slot++;
+  });
+  tables.sort(function(a, b){ return order.indexOf(a) - order.indexOf(b); });
+  tables.forEach(function(t){ delete t._hadPos; });
   var logical = freshLogicalState(projectName);
   logical.nodes = tables;
   logical.nextIds.table = tables.length + 1;
@@ -7974,6 +8018,34 @@ document.getElementById("btnCopySql").addEventListener("click", function(){
 });
 // Pedido do usuário: "A janela do SQL pode ser editado e alterado pelo usuário" -- mantém
 // `physicalSql` em sincronia com o que o usuário digita/cola na caixa, sem tocar no modelo lógico.
+// Pedido do usuário: Tab no SQL do Modelo Físico serve para identar (2 espaços, o mesmo recuo do SQL
+// gerado) em vez de passar o foco; com várias linhas selecionadas, identa todas; Shift+Tab desfaz o recuo.
+document.getElementById("sqlOutput").addEventListener("keydown", function(e){
+  if (e.key !== "Tab" || e.ctrlKey || e.altKey || e.metaKey) return;
+  e.preventDefault();
+  var ta = e.target, v = ta.value, a = ta.selectionStart, b = ta.selectionEnd, IND = "  ";
+  var multi = v.slice(a, b).indexOf("\n") !== -1;
+  if (!e.shiftKey && !multi){
+    ta.setRangeText(IND, a, b, "end");
+  } else {
+    var ls = v.lastIndexOf("\n", a - 1) + 1;
+    var blockEnd = b > a && v.charAt(b - 1) === "\n" ? b - 1 : b;
+    var lines = v.slice(ls, blockEnd).split("\n");
+    var firstDelta = 0, total = 0;
+    var out = lines.map(function(l, i){
+      var r, d;
+      if (e.shiftKey){ var m = /^( {1,2}|\t)/.exec(l); d = m ? -m[0].length : 0; r = m ? l.slice(m[0].length) : l; }
+      else { d = IND.length; r = IND + l; }
+      if (i === 0) firstDelta = d;
+      total += d;
+      return r;
+    }).join("\n");
+    ta.setRangeText(out, ls, blockEnd, "preserve");
+    ta.selectionStart = Math.max(ls, a + firstDelta);
+    ta.selectionEnd = Math.max(ta.selectionStart, b + total);
+  }
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+});
 document.getElementById("sqlOutput").addEventListener("input", function(e){
   physicalSql = e.target.value;
   scheduleAutosave();
