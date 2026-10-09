@@ -2225,6 +2225,25 @@ function generateSqlFromLogicalModel(logical){
   if (!tables.length) return "";
   var byId = {};
   tables.forEach(function(t){ byId[t.id] = t; });
+  // Pedido do usuário: cria primeiro as tabelas sem chave estrangeira e, em seguida, as que só
+  // referenciam tabelas já criadas (ordem topológica, estável: mantém a ordem original quando
+  // possível). Autorreferência não conta; num ciclo de referências, o restante segue na ordem original.
+  (function(){
+    var deps = {};
+    tables.forEach(function(t){
+      deps[t.id] = {};
+      (t.columns || []).forEach(function(c){ if (c.fk && c.fkTable && c.fkTable !== t.id && byId[c.fkTable]) deps[t.id][c.fkTable] = true; });
+    });
+    var done = {}, sorted = [], left = tables.slice();
+    while (left.length){
+      var ready = left.filter(function(t){ return Object.keys(deps[t.id]).every(function(d){ return done[d]; }); });
+      if (!ready.length) ready = [left[0]]; // ciclo: quebra pela primeira tabela restante
+      // uma "rodada" por vez: primeiro as que não dependem de nada pendente, preservando a ordem original
+      ready.forEach(function(t){ done[t.id] = true; sorted.push(t); });
+      left = left.filter(function(t){ return !done[t.id]; });
+    }
+    tables = sorted;
+  })();
   var blocks = [];
   tables.forEach(function(t){
     var cols = t.columns || [];
