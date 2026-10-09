@@ -5628,7 +5628,7 @@ function renderTablePanel(n){
     renameForeignKeyColumnsForTableRename(n, oldName, n.name);
     render();
     var el = document.getElementById("pf-table-name");
-    if (el){ el.focus(); el.setSelectionRange(e.target.value.length, e.target.value.length); }
+    if (el){ el.focus(); el.setSelectionRange(e.target.selectionStart, e.target.selectionEnd); }
   });
   panelEl.querySelectorAll(".col-name").forEach(function(inp){
     inp.addEventListener("input", function(e){
@@ -5642,7 +5642,7 @@ function renderTablePanel(n){
       // que não existe mais.
       syncForeignKeysForColumnChange(n, oldName, newName, null, null);
       render();
-      refocus(".col-name", i, e.target.value.length);
+      refocus(".col-name", i, e.target.selectionStart);
     });
   });
   panelEl.querySelectorAll(".col-type-base").forEach(function(sel){
@@ -5675,7 +5675,7 @@ function renderTablePanel(n){
       col.dataSize = e.target.value;
       syncForeignKeysForColumnChange(n, col.name, col.name, col.dataType, col.dataSize || "", col.dataDecimals || "");
       render();
-      refocus(".col-type-size", i, e.target.value.length);
+      refocus(".col-type-size", i, e.target.selectionStart);
     });
   });
   // Casas decimais (só existe no DOM quando o tipo da coluna é DECIMAL -- ver renderização acima).
@@ -5687,7 +5687,7 @@ function renderTablePanel(n){
       col.dataDecimals = e.target.value;
       syncForeignKeysForColumnChange(n, col.name, col.name, col.dataType, col.dataSize || "", col.dataDecimals || "");
       render();
-      refocus(".col-type-decimals", i, e.target.value.length);
+      refocus(".col-type-decimals", i, e.target.selectionStart);
     });
   });
   panelEl.querySelectorAll(".col-pk").forEach(function(chk){
@@ -5764,7 +5764,7 @@ function renderTablePanel(n){
       n.columns[i].constraints[ci].p1 = e.target.value;
       render();
       var el = panelEl.querySelector('.col-constraint-p1[data-i="' + i + '"][data-ci="' + ci + '"]');
-      if (el){ el.focus(); el.setSelectionRange(e.target.value.length, e.target.value.length); }
+      if (el){ el.focus(); el.setSelectionRange(e.target.selectionStart, e.target.selectionEnd); }
     });
   });
   panelEl.querySelectorAll(".col-constraint-p2").forEach(function(inp){
@@ -5774,7 +5774,7 @@ function renderTablePanel(n){
       n.columns[i].constraints[ci].p2 = e.target.value;
       render();
       var el = panelEl.querySelector('.col-constraint-p2[data-i="' + i + '"][data-ci="' + ci + '"]');
-      if (el){ el.focus(); el.setSelectionRange(e.target.value.length, e.target.value.length); }
+      if (el){ el.focus(); el.setSelectionRange(e.target.selectionStart, e.target.selectionEnd); }
     });
   });
   panelEl.querySelectorAll(".col-constraint-del").forEach(function(btn){
@@ -5992,7 +5992,7 @@ function updatePanel(){
     html += '<button class="danger-btn" id="pf-delete">Excluir elemento</button>';
     panelEl.innerHTML = html;
 
-    document.getElementById("pf-name").addEventListener("input", function(e){ n.name = e.target.value; realignAttributesAfterRename(n); render(); document.getElementById("pf-name").focus(); document.getElementById("pf-name").setSelectionRange(e.target.value.length, e.target.value.length); });
+    document.getElementById("pf-name").addEventListener("input", function(e){ n.name = e.target.value; realignAttributesAfterRename(n); render(); document.getElementById("pf-name").focus(); document.getElementById("pf-name").setSelectionRange(e.target.selectionStart, e.target.selectionEnd); });
     if (n.type === "entity") document.getElementById("pf-weak").addEventListener("change", function(e){ n.weak = e.target.checked; render(); });
     if (n.type === "attribute"){
       document.getElementById("pf-key").addEventListener("change", function(e){ n.isKey = e.target.checked; render(); });
@@ -6052,7 +6052,7 @@ function updatePanel(){
       document.getElementById("pf-role").addEventListener("input", function(e){
         ed.role = e.target.value; render();
         var roleEl = document.getElementById("pf-role");
-        if (roleEl){ roleEl.focus(); roleEl.setSelectionRange(e.target.value.length, e.target.value.length); }
+        if (roleEl){ roleEl.focus(); roleEl.setSelectionRange(e.target.selectionStart, e.target.selectionEnd); }
       });
     } else if (ed.kind === "fk"){
       document.getElementById("pf-fk-cchild-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "min", e.target.value); render(); });
