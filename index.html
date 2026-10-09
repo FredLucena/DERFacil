@@ -2533,16 +2533,29 @@ function parseSqlToLogicalModel(sql, oldLogical, projectName){
     });
   });
   var byIdT = {}; tables.forEach(function(t){ byIdT[t.id] = t; });
-  var seen = {}, order = [];
-  function visit(startId){
-    var stack = [startId];
-    while (stack.length){
-      var id = stack.pop();
-      if (seen[id]) continue;
-      seen[id] = true; order.push(byIdT[id]);
-      adj[id].slice().sort(function(a, b){ return tables.indexOf(byIdT[b]) - tables.indexOf(byIdT[a]); })
-        .forEach(function(n){ if (!seen[n]) stack.push(n); });
+  var seen = {}, order = [], baseY = 160;
+  // Camadas a partir da ponta: cada tabela fica na coluna = distância até a ponta, então uma tabela
+  // associativa (que nasce de um relacionamento) cai sempre ENTRE as duas tabelas que ela liga e a
+  // linha de conexão não passa por cima de outra tabela. Tabelas da mesma camada ficam empilhadas.
+  function layoutComponent(startId){
+    var depth = {}, layers = [], queue = [startId];
+    depth[startId] = 0;
+    while (queue.length){
+      var id = queue.shift();
+      (layers[depth[id]] = layers[depth[id]] || []).push(id);
+      adj[id].slice().sort(function(x, y){ return tables.indexOf(byIdT[x]) - tables.indexOf(byIdT[y]); })
+        .forEach(function(n){ if (!(n in depth)){ depth[n] = depth[id] + 1; queue.push(n); } });
     }
+    var rowsMax = 0;
+    layers.forEach(function(ids, d){
+      ids.sort(function(x, y){ return tables.indexOf(byIdT[x]) - tables.indexOf(byIdT[y]); });
+      ids.forEach(function(id, r){
+        var t = byIdT[id]; seen[id] = true; order.push(t);
+        if (!t._hadPos){ t.x = 200 + d * 340; t.y = baseY + r * 280; }
+      });
+      rowsMax = Math.max(rowsMax, ids.length);
+    });
+    baseY += rowsMax * 280;
   }
   tables.forEach(function(t){
     if (seen[t.id]) return;
@@ -2553,12 +2566,7 @@ function parseSqlToLogicalModel(sql, oldLogical, projectName){
     // desempate entre pontas: a que aparece primeiro no nome da tabela vizinha (Pedido em Pedido_Produto), depois a ordem do SQL
     var posIn = function(u){ var nb = byIdT[adj[u.id][0]]; var i = nb ? nb.name.toLowerCase().indexOf(u.name.toLowerCase()) : -1; return i < 0 ? 1e9 : i; };
     ends.sort(function(a, b){ return (posIn(a) - posIn(b)) || (tables.indexOf(a) - tables.indexOf(b)); });
-    visit((ends[0] || t).id);
-  });
-  var slot = 0;
-  order.forEach(function(t){
-    if (!t._hadPos){ t.x = 200 + (slot % 4) * 340; t.y = 160 + Math.floor(slot / 4) * 280; }
-    slot++;
+    layoutComponent((ends[0] || t).id);
   });
   tables.sort(function(a, b){ return order.indexOf(a) - order.indexOf(b); });
   tables.forEach(function(t){ delete t._hadPos; });
