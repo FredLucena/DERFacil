@@ -6047,6 +6047,16 @@ function renderTablePanel(n){
   document.getElementById("pf-delete").addEventListener("click", function(){ deleteNode(n.id); render(); });
 }
 
+// Participação oposta em um relacionamento binário (para "Inverter cardinalidade" no modelo conceitual).
+function conceptualPartnerEdge(ed){
+  var rel = null, relId = null;
+  var n1 = getNode(ed.from), n2 = getNode(ed.to);
+  if (n1 && n1.type === "relationship") relId = n1.id; else if (n2 && n2.type === "relationship") relId = n2.id;
+  if (!relId) return null;
+  var parts = state.edges.filter(function(e){ return e.kind === "participation" && (e.from === relId || e.to === relId); });
+  if (parts.length !== 2) return null;
+  return parts[0].id === ed.id ? parts[1] : (parts[1].id === ed.id ? parts[0] : null);
+}
 function updatePanel(){
   currentNoteEditorEl = null;
   noteSelRange = null;
@@ -6222,6 +6232,8 @@ function updatePanel(){
     } else {
       html2 += '<p class="hint">Ligação entre atributo e sua entidade/relacionamento/atributo composto, ou entre entidade e generalização.</p>';
     }
+    var partPair = ed.kind === "participation" ? conceptualPartnerEdge(ed) : null;
+    if (partPair) html2 += '<button class="action-btn" id="pf-part-swap" title="Troca de lugar a cardinalidade desta ponta com a da outra ponta do relacionamento">Inverter cardinalidade</button>';
     if (ed.kind === "fk") html2 += '<button class="action-btn" id="pf-fk-swap" title="Troca de lugar a cardinalidade da esquerda com a da direita">Inverter cardinalidade</button>';
     html2 += '<button class="danger-btn" id="pf-delete-edge">Excluir conexão</button>';
     panelEl.innerHTML = html2;
@@ -6238,6 +6250,14 @@ function updatePanel(){
       document.getElementById("pf-fk-cchild-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "max", e.target.value); maybeFlipFkSide(ed); render(); });
       document.getElementById("pf-fk-cparent-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardParent", "min", e.target.value); maybeFlipFkSide(ed); render(); });
       document.getElementById("pf-fk-cparent-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardParent", "max", e.target.value); maybeFlipFkSide(ed); render(); });
+    }
+    if (partPair){
+      document.getElementById("pf-part-swap").addEventListener("click", function(){
+        var mn = ed.min, mx = ed.max;
+        ed.min = partPair.min; ed.max = partPair.max;
+        partPair.min = mn; partPair.max = mx;
+        render();
+      });
     }
     if (ed.kind === "fk"){
       // Pedido do usuário: troca de posição as duas cardinalidades da conexão (a de uma ponta vai para a
