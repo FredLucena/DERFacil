@@ -3715,6 +3715,40 @@ function syncForeignKeysForColumnChange(refTable, oldColName, newColName, newDat
     if (t.type !== "table") return;
     (t.columns || []).forEach(function(c){
       if (c.fk && c.fkTable === refTable.id && c.fkColumn === oldColName){
+        // Pedido do usuário: a coluna FK acompanha o novo nome da PK quando o nome dela segue um padrão
+        // ligado ao da PK: (a) mesmo nome da PK; (b) convenção PK_X <-> FK_X; (c) nome automático
+        // "tabela_pk" (com ou sem número no fim). O padrão é detectado uma vez e guardado em c._follow,
+        // para continuar valendo enquanto o nome da PK é digitado letra a letra (estados intermediários
+        // como "P" ou "" não quebram a ligação). Nome escolhido à mão, sem padrão, não é tocado.
+        if (oldColName !== newColName){
+          var slugT = slugColumnName(refTable.name);
+          if (!c._follow){
+            var autoPrefix = slugT + "_" + oldColName;
+            var mPk = /^pk(_?)(.*)$/i.exec(oldColName), mFk = /^fk(_?)(.*)$/i.exec(c.name);
+            if (c.name === oldColName && oldColName !== "") c._follow = { kind:"same" };
+            else if (mPk && mFk && mPk[2] === mFk[2] && mPk[2] !== "") c._follow = { kind:"pk", prefix: c.name.slice(0, 2) + mFk[1] };
+            else if (c.name.indexOf(autoPrefix) === 0 && (c.name.length === autoPrefix.length || /^\d+$/.test(c.name.slice(autoPrefix.length)))) c._follow = { kind:"auto", suffix: c.name.slice(autoPrefix.length) };
+            else if (/^(chave_estrangeira|campo)\d*$/i.test(c.name)) c._follow = { kind:"auto", suffix:"" };
+            else if (oldColName.length >= 2){
+              // (d) o nome da FK contém o nome antigo da PK (sem diferenciar maiúsculas), como "id_cliente"
+              // ou "ClienteCPF" para a PK "CPF": só a parte igual ao nome antigo é trocada.
+              var at = c.name.toLowerCase().lastIndexOf(oldColName.toLowerCase());
+              if (at >= 0) c._follow = { kind:"sub", pre: c.name.slice(0, at), post: c.name.slice(at + oldColName.length) };
+            }
+          }
+          var f = c._follow, newFkName = null;
+          if (f){
+            if (f.kind === "same") newFkName = newColName;
+            else if (f.kind === "pk") newFkName = f.prefix + newColName.replace(/^pk_?/i, "");
+            else if (f.kind === "auto") newFkName = slugT + "_" + newColName + f.suffix;
+            else if (f.kind === "sub") newFkName = f.pre + newColName + f.post;
+          }
+          if (newFkName !== null){
+            var base = newFkName, k = 2;
+            while ((t.columns || []).some(function(o){ return o !== c && o.name === newFkName; })){ newFkName = base + k; k++; }
+            c.name = newFkName;
+          }
+        }
         c.fkColumn = newColName;
         if (newDataType != null) c.dataType = newDataType;
         if (newDataSize != null) c.dataSize = newDataSize;
@@ -4089,6 +4123,57 @@ function linkSelectedEntitiesInChain(entities, opts){
 
 // Janela do botão direito sobre uma entidade: cria N novas entidades a partir dela, em fileira
 // vertical (para baixo) ou horizontal (para a direita), com ou sem relacionamentos entre elas.
+// Pedido do usuário: botão direito no botão "Tabela" (modelo lógico) pergunta quantas tabelas criar
+// (padrão 2). Elas nascem em branco (só a coluna "id", PK), lado a lado, abaixo do que já existe
+// (ou no centro da área visível, se o quadro estiver vazio), em linhas de até 4.
+function askCreateTables(){
+  var backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-box">' +
+      '<h2>Criar tabelas</h2>' +
+      '<p>Tabelas novas e em branco, ' + (state.nodes.length ? 'abaixo do que já existe no quadro.' : 'no centro da área visível do quadro.') + '</p>' +
+      '<div class="field"><label for="ctQty">Quantidade de tabelas</label>' +
+        '<input type="number" id="ctQty" min="1" max="30" step="1" value="2"></div>' +
+      '<div class="modal-actions">' +
+        '<button data-a="cancel">Cancelar</button>' +
+        '<button data-a="ok" class="primary">Criar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  var qty = backdrop.querySelector("#ctQty");
+  function cleanup(){ backdrop.remove(); }
+  function submit(){
+    var n = Math.round(Number(qty.value));
+    if (!isFinite(n)) n = 2;
+    n = clamp(n, 1, 30);
+    cleanup();
+    var COLS = 4, DX = 300, DY = 220;
+    var bx = view.x + view.w / 2 - (Math.min(n, COLS) - 1) * DX / 2, by = view.y + view.h / 2;
+    if (state.nodes.length){
+      var minX = Infinity, maxY = -Infinity;
+      state.nodes.forEach(function(o){ var d = computeDims(o); minX = Math.min(minX, centerX(o, d)); maxY = Math.max(maxY, o.y + d.h / 2); });
+      bx = minX; by = maxY + 140;
+    }
+    var made = [];
+    for (var i = 0; i < n; i++){
+      var x = bx + (i % COLS) * DX, y = by + Math.floor(i / COLS) * DY;
+      if (snapToGrid){ x = snapValue(x); y = snapValue(y); }
+      made.push(addNodeAt("table", { columns: [{ name:"id", dataType:"INT", pk:true, fk:false, fkTable:null, fkColumn:null }] }, x, y));
+    }
+    selectedNodeIds = new Set(made.map(function(m){ return m.id; })); selectedEdgeIds = new Set();
+    render();
+    showToast(n + (n === 1 ? " tabela criada." : " tabelas criadas.") + " Ctrl+Z desfaz.");
+  }
+  backdrop.addEventListener("keydown", function(e){
+    if (e.key === "Enter"){ e.preventDefault(); submit(); }
+    else if (e.key === "Escape"){ e.stopPropagation(); cleanup(); }
+  });
+  backdrop.addEventListener("click", function(e){ if (e.target === backdrop) cleanup(); });
+  backdrop.querySelector('[data-a="cancel"]').addEventListener("click", cleanup);
+  backdrop.querySelector('[data-a="ok"]').addEventListener("click", submit);
+  qty.focus(); qty.select();
+}
 function askCreateEntities(node){
   var backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
@@ -5010,6 +5095,18 @@ function getSingleSelectedTable(){
   return (n && n.type === "table") ? n : null;
 }
 // Gera um nome de coluna que ainda não existe na tabela (ex.: "chave_primaria", "chave_primaria2", ...).
+// Pedido do usuário: uma coluna FK inserida à mão (nome padrão "chave_estrangeira", com número ou não) passa
+// a ter, assim que a referência (tabela + coluna) existe, o mesmo nome automático das FKs criadas ao conectar
+// ("tabela_coluna"), para que a renomeação da chave primária se propague a ela. Nome já escolhido pelo
+// usuário nunca é trocado.
+function autoNameDefaultFk(table, col){
+  if (!col || !col.fk || !col.fkTable || !col.fkColumn || !/^(chave_estrangeira|campo)\d*$/i.test(col.name || "")) return;
+  var ref = getNode(col.fkTable);
+  if (!ref) return;
+  var base = slugColumnName(ref.name) + "_" + col.fkColumn, name = base, i = 2;
+  while ((table.columns || []).some(function(o){ return o !== col && o.name === name; })){ name = base + i; i++; }
+  col.name = name;
+}
 function uniqueColumnName(table, base){
   var name = base, i = 2;
   while ((table.columns || []).some(function(c){ return c.name === name; })){ name = base + i; i++; }
@@ -5091,6 +5188,10 @@ async function bulkAddFromToolbarButton(btn, fixedQty){
     askCreateEntities(null);
     return;
   }
+  if (addType === "table"){
+    askCreateTables();
+    return;
+  }
   if (!spec){
     showToast("O botão direito adiciona vários de uma vez só em Simples e Identificador (modelo conceitual) ou em Campo e Chave primária (modelo lógico).", "warn");
     return;
@@ -5155,6 +5256,7 @@ document.getElementById("btnAddFkColumn").addEventListener("click", function(){
   var col = { name: uniqueColumnName(t, "chave_estrangeira"), dataType:"INT", dataSize:"", pk:false, fk:true, fkTable:refTable.id, fkColumn: refCol ? refCol.name : null, cardChild:{min:"0",max:"N"}, cardParent:{min:"1",max:"1"} };
   t.columns.push(col);
   syncColumnDataTypeFromReference(col);
+  autoNameDefaultFk(t, col);
   selectedNodeIds = new Set([t.id]);
   selectedEdgeIds = new Set();
   render();
@@ -5743,6 +5845,7 @@ function renderTablePanel(n){
         if (!col.cardChild) col.cardChild = { min:"0", max:"N" };
         if (!col.cardParent) col.cardParent = { min:"1", max:"1" };
         syncColumnDataTypeFromReference(col);
+        autoNameDefaultFk(n, col);
       } else {
         col.fkTable = null; col.fkColumn = null;
       }
@@ -5758,6 +5861,7 @@ function renderTablePanel(n){
       var refPk = refTable && (refTable.columns || []).filter(function(rc){ return rc.pk; })[0];
       col.fkColumn = refPk ? refPk.name : (refTable && refTable.columns && refTable.columns[0] ? refTable.columns[0].name : null);
       syncColumnDataTypeFromReference(col);
+      autoNameDefaultFk(n, col);
       render();
     });
   });
@@ -5767,6 +5871,7 @@ function renderTablePanel(n){
       var col = n.columns[i];
       col.fkColumn = e.target.value;
       syncColumnDataTypeFromReference(col);
+      autoNameDefaultFk(n, col);
       render();
     });
   });
