@@ -412,6 +412,11 @@
     border:1px solid var(--danger); border-radius:7px; padding:8px; font-size:13px; font-weight:600;
   }
   .danger-btn:hover{ filter:brightness(1.05); }
+  .action-btn{
+    width:100%; margin-top:8px; background:var(--surface-2); color:var(--ink);
+    border:1px solid var(--border); border-radius:7px; padding:8px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .action-btn:hover{ filter:brightness(0.97); }
   .hint{ font-size:11.5px; color:var(--ink-soft); margin-top:4px; line-height:1.4; }
 
   .zoom-ctl{
@@ -2013,6 +2018,47 @@ function removeLogicalFkColumns(edge){
 }
 // Grava min/max de um dos lados (cardChild ou cardParent) em TODAS as colunas FK que formam essa
 // conexão (uma FK composta, com mais de uma coluna, deve manter a mesma cardinalidade em todas).
+// Pedido do usuário: ao alterar as cardinalidades de uma conexão no modelo lógico, a chave estrangeira
+// fica sempre do lado "muitos" (a ponta com máximo N). Se o lado que guarda a FK passou a ter máximo 1
+// enquanto o outro lado é N (1:N virou N:1), a FK muda de tabela: as colunas saem daqui e a tabela
+// do lado N ganha FK(s) apontando para a chave primária desta, com as cardinalidades trocadas. N:N
+// exige tabela associativa (só avisa); a FK que também é parte da PK da tabela não é movida.
+function maybeFlipFkSide(edge){
+  var cols = fkColumnsForEdge(edge);
+  if (!cols.length) return false;
+  var cc = cols[0].cardChild, cp = cols[0].cardParent;
+  if (!cc || !cp) return false;
+  if (cc.max === "N" && cp.max === "N"){
+    showToast("Cardinalidade N:N: a ligação precisa de uma tabela associativa, então a chave estrangeira não foi movida.", "warn");
+    return false;
+  }
+  if (!(cc.max === "1" && cp.max === "N")) return false;
+  var holder = getNode(edge.from), ref = getNode(edge.to);
+  if (!holder || !ref) return false;
+  if (cols.some(function(c){ return c.pk; })){
+    showToast("A chave estrangeira faz parte da chave primária de \"" + holder.name + "\" e não pode mudar de lado.", "warn");
+    return false;
+  }
+  var pks = (holder.columns || []).filter(function(c){ return c.pk; });
+  if (!pks.length){
+    showToast("\"" + holder.name + "\" não tem chave primária; defina uma para a chave estrangeira poder mudar de lado.", "warn");
+    return false;
+  }
+  holder.columns = holder.columns.filter(function(c){ return cols.indexOf(c) === -1; });
+  var already = (ref.columns || []).some(function(c){ return c.fk && c.fkTable === holder.id; });
+  if (!already){
+    pks.forEach(function(pk){
+      var base = slugColumnName(holder.name) + "_" + pk.name, name = base, i = 2;
+      while (ref.columns.some(function(o){ return o.name === name; })){ name = base + i; i++; }
+      ref.columns.push({ name: name, dataType: pk.dataType, dataSize: pk.dataSize || "", dataDecimals: pk.dataDecimals || "",
+        pk:false, fk:true, fkTable: holder.id, fkColumn: pk.name,
+        cardChild: { min: cp.min, max: cp.max }, cardParent: { min: cc.min, max: cc.max }, constraints: [] });
+    });
+  }
+  selectedEdgeIds = new Set(["fk_" + ref.id + "_" + holder.id]);
+  showToast('A chave estrangeira mudou de lado: agora fica em "' + ref.name + '" e referencia "' + holder.name + '". Ctrl+Z desfaz.');
+  return true;
+}
 function setFkCardinalityField(edge, side, field, value){
   fkColumnsForEdge(edge).forEach(function(c){
     c[side] = Object.assign({ min:"0", max:"N" }, c[side] || {});
@@ -6176,6 +6222,7 @@ function updatePanel(){
     } else {
       html2 += '<p class="hint">Ligação entre atributo e sua entidade/relacionamento/atributo composto, ou entre entidade e generalização.</p>';
     }
+    if (ed.kind === "fk") html2 += '<button class="action-btn" id="pf-fk-swap" title="Troca de lugar a cardinalidade da esquerda com a da direita">Inverter cardinalidade</button>';
     html2 += '<button class="danger-btn" id="pf-delete-edge">Excluir conexão</button>';
     panelEl.innerHTML = html2;
     if (ed.kind === "participation"){
@@ -6187,10 +6234,25 @@ function updatePanel(){
         if (roleEl){ roleEl.focus(); roleEl.setSelectionRange(e.target.selectionStart, e.target.selectionEnd); }
       });
     } else if (ed.kind === "fk"){
-      document.getElementById("pf-fk-cchild-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "min", e.target.value); render(); });
-      document.getElementById("pf-fk-cchild-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "max", e.target.value); render(); });
-      document.getElementById("pf-fk-cparent-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardParent", "min", e.target.value); render(); });
-      document.getElementById("pf-fk-cparent-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardParent", "max", e.target.value); render(); });
+      document.getElementById("pf-fk-cchild-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "min", e.target.value); maybeFlipFkSide(ed); render(); });
+      document.getElementById("pf-fk-cchild-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardChild", "max", e.target.value); maybeFlipFkSide(ed); render(); });
+      document.getElementById("pf-fk-cparent-min").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardParent", "min", e.target.value); maybeFlipFkSide(ed); render(); });
+      document.getElementById("pf-fk-cparent-max").addEventListener("change", function(e){ setFkCardinalityField(ed, "cardParent", "max", e.target.value); maybeFlipFkSide(ed); render(); });
+    }
+    if (ed.kind === "fk"){
+      // Pedido do usuário: troca de posição as duas cardinalidades da conexão (a de uma ponta vai para a
+      // outra); se isso inverter o "um" e o "muitos", a chave estrangeira muda de lado (maybeFlipFkSide).
+      document.getElementById("pf-fk-swap").addEventListener("click", function(){
+        var cols = fkColumnsForEdge(ed);
+        if (!cols.length) return;
+        cols.forEach(function(c){
+          var a = c.cardChild || { min:"0", max:"N" }, b = c.cardParent || { min:"1", max:"1" };
+          c.cardChild = { min: b.min, max: b.max };
+          c.cardParent = { min: a.min, max: a.max };
+        });
+        maybeFlipFkSide(ed);
+        render();
+      });
     }
     document.getElementById("pf-delete-edge").addEventListener("click", function(){ deleteEdge(ed.id); render(); });
   }
