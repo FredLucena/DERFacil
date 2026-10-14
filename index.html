@@ -7380,7 +7380,9 @@ async function tryNativeSavePicker(filename){
       suggestedName: filename,
       types: [{ description: ext ? ext.toUpperCase() : "Arquivo", accept: acceptMap }]
     });
-    return await handle.createWritable();
+    var writable = await handle.createWritable();
+    try { writable.__fileName = handle.name; } catch (e2){}
+    return writable;
   } catch (err){
     return null;
   }
@@ -7412,7 +7414,7 @@ async function downloadFile(filename, data, msgs, nativeWriter){
       await nativeWriter.write(blobToWrite);
       await nativeWriter.close();
       showToast(msgs.saved);
-      return;
+      return nativeWriter.__fileName || filename;
     } catch (err){
       // Escrever no arquivo falhou depois que a janela já tinha sido aceita (raro, ex.: disco
       // cheio, permissão negada pelo SO) -- cai pros caminhos de reserva abaixo, iguais a antes.
@@ -7430,7 +7432,7 @@ async function downloadFile(filename, data, msgs, nativeWriter){
     } catch (err){
       showToast(msgs.failed, "warn");
     }
-    return;
+    return null;
   }
   try {
     var cap = downloadsCap || await window.claude.use("downloads");
@@ -7441,6 +7443,7 @@ async function downloadFile(filename, data, msgs, nativeWriter){
     }
     var res = await cap.save({ filename:filename, data:data });
     showToast(res.status === "delivered" ? msgs.delivered : msgs.saved);
+    return (res && (res.filename || res.name)) || null;
   } catch (err){
     var code = err && err.code;
     if (code === "declined"){ showToast("Exportação cancelada."); }
@@ -7449,14 +7452,34 @@ async function downloadFile(filename, data, msgs, nativeWriter){
   }
 }
 
+function applySavedProjectName(savedName){
+  // Pedido do usuário: o nome do projeto na barra superior passa a coincidir com o nome escolhido ao salvar.
+  if (typeof savedName !== "string" || !/\.json$/i.test(savedName)) return;
+  var newName = savedName.replace(/\.json$/i, "").trim();
+  if (!newName || newName === state.projectName) return;
+  state.projectName = newName;
+  if (conceptualModel) conceptualModel.projectName = newName;
+  if (logicalModel) logicalModel.projectName = newName;
+  projectNameInput.value = newName;
+  scheduleAutosave();
+}
+
 async function exportProjectJson(){
-  var json = JSON.stringify(buildProjectSnapshot(), null, 2);
   var filename = projectFileBase() + ".json";
-  await downloadFile(filename, json, {
+  var msgs = {
     saved: "Projeto baixado como " + filename + ".",
     delivered: "Projeto enviado.",
     failed: "Não foi possível baixar o projeto agora. Seu progresso continua salvo automaticamente neste navegador."
-  });
+  };
+  // A janela "Salvar como" abre primeiro: assim o nome escolhido já entra no próprio arquivo salvo.
+  var writer = await tryNativeSavePicker(filename);
+  if (writer && writer.__fileName){
+    applySavedProjectName(writer.__fileName);
+    msgs.saved = "Projeto baixado como " + writer.__fileName + ".";
+  }
+  var json = JSON.stringify(buildProjectSnapshot(), null, 2);
+  var savedName = await downloadFile(filename, json, msgs, writer);
+  if (!writer) applySavedProjectName(savedName);
 }
 
 // ---------- exportar o diagrama atual como imagem (JPG) ou PDF ----------
