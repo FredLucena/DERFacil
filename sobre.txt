@@ -1,0 +1,9 @@
+Sobre o DER Fácil
+O DER Fácil é uma ferramenta para criar diagramas de modelagem de dados nas notações Entidade-Relacionamento (Chen), no modelo conceitual, e de tabelas, no modelo lógico/relacional — com conversão automática do modelo conceitual para o modelo lógico, e do modelo lógico para o modelo físico (geração do código SQL). Foi pensado para uso didático em disciplinas de banco de dados, ajudando professores e estudantes a desenhar, revisar e discutir modelos de dados.
+
+Versão: 2.0
+Desenvolvedor: Fred Lucena
+
+Esta ferramenta é fornecida como está, sem garantias de qualquer tipo. A responsabilidade pela revisão, validação e adequação dos modelos criados é de quem os utiliza — o DER Fácil é um apoio ao ensino e ao trabalho, e não substitui a análise técnica necessária antes de aplicar um modelo em um sistema real.
+
+Registre aqui a sua contribuição para a melhoria da ferramenta.
