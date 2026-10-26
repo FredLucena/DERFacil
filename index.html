@@ -6790,6 +6790,39 @@ function convertConceptualToLogical(conceptual){
   var usedRelFkColumns = {};
   relationships.filter(function(r){ return !r.identifying; }).forEach(function(r){
     var parts = participantsOf(r.id);
+    if (parts.length >= 3){
+      // Relacionamento ternário (ou de grau maior): vira uma tabela associativa com uma FK para a
+      // PK de CADA entidade participante, e TODAS essas FKs juntas formam a chave primária composta.
+      var nTables = parts.map(function(pt){ return tableByEntityId[pt.entity.id]; });
+      if (nTables.some(function(t){ return !t || !t.columns.some(function(c){ return c.pk; }); })) return;
+      var nName = nTables.map(function(t){ return t.name; }).join("_");
+      if (usedJunctionNames[nName]){
+        var nBase = nName + "_" + (r.name || "Rel"), nTry = nBase, nK = 2;
+        while (usedJunctionNames[nTry]){ nTry = nBase + nK; nK++; }
+        nName = nTry;
+      }
+      usedJunctionNames[nName] = true;
+      var inKey = parts.map(function(){ return true; });
+      var nJunction = { id: uid("nd"), type:"table", name: nName, x:r.x, y:r.y, columns: [] };
+      var usedNames = {};
+      var nCols = [];
+      parts.forEach(function(pt, idx){
+        var tbl = nTables[idx];
+        tbl.columns.filter(function(c){ return c.pk; }).forEach(function(pk){
+          var base = (pt.edge.role && pt.edge.role.trim()) ? slugColumnName(pt.edge.role) : slugColumnName(tbl.name);
+          var colName = base + "_" + pk.name, nn = 2;
+          while (usedNames[colName]){ colName = base + "_" + pk.name + "_" + nn; nn++; }
+          usedNames[colName] = true;
+          nCols.push({ name: colName, dataType:pk.dataType, dataSize:pk.dataSize, pk: inKey[idx], fk:true, fkTable:tbl.id, fkColumn:pk.name,
+            cardChild:{ min: pt.edge.min || "0", max:"N" }, cardParent:{ min:"1", max:"1" } });
+        });
+      });
+      // Chaves (PK) primeiro, depois as demais FKs, depois os atributos próprios do relacionamento.
+      nJunction.columns = nCols.filter(function(c){ return c.pk; }).concat(nCols.filter(function(c){ return !c.pk; }));
+      ownAttrsOf(r.id).forEach(function(at){ nJunction.columns = nJunction.columns.concat(columnsForAttr(at)); });
+      logical.nodes.push(nJunction);
+      return;
+    }
     if (parts.length !== 2) return; // só relacionamentos binários são mapeados automaticamente
     var pa = parts[0], pb = parts[1];
     var tableA = tableByEntityId[pa.entity.id], tableB = tableByEntityId[pb.entity.id];
