@@ -7082,6 +7082,13 @@ function convertLogicalToConceptual(logical){
   tables.forEach(function(t){
     var fpk = fkPkCols(t), nfpk = nonFkPkCols(t);
     var refs = refTablesOf(fpk);
+    // Tabela associativa de um relacionamento ternário (ou maior): a chave primária composta é
+    // formada só por FKs, apontando para TRÊS OU MAIS tabelas diferentes.
+    if (fpk.length >= 3 && refs.length >= 3 && nfpk.length === 0){
+      kindOf[t.id] = "junction";
+      junctionInfo[t.id] = { multi: refs.map(function(rid){ return { id: rid, cols: fpk.filter(function(c){ return c.fkTable === rid; }) }; }) };
+      return;
+    }
     if (fpk.length && refs.length === 2 && nfpk.length === 0){
       kindOf[t.id] = "junction";
       junctionInfo[t.id] = {
@@ -7218,6 +7225,17 @@ function convertLogicalToConceptual(logical){
   // ---------- Passo 5: tabelas associativas -> relacionamento N:N ----------
   Object.keys(junctionInfo).forEach(function(tid){
     var t = tableById[tid], info = junctionInfo[tid];
+    if (info.multi){
+      var mEnts = info.multi.map(function(m){ return entityByTableId[m.id]; });
+      if (mEnts.some(function(en){ return !en; })) return;
+      var mRel = addNode("relationship", {}, t.x, t.y);
+      info.multi.forEach(function(m, mi){
+        var mc = cardOf(m.cols, "cardChild", { min:"0", max:"N" });
+        addEdge(mEnts[mi].id, mRel.id, { kind:"participation", min:mc.min, max:mc.max });
+      });
+      layoutColumnsAsAttributes(mRel, (t.columns || []).filter(function(c){ return !c.pk && !c.fk; }));
+      return;
+    }
     var a = entityByTableId[info.aId], b = entityByTableId[info.bId];
     if (!a || !b) return;
     // Convenção da conversão de ida: as colunas que referenciam A carregam, em cardChild, a
