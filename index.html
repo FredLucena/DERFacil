@@ -4405,6 +4405,254 @@ function layoutWholeModel(vertical){
   fitToContent();
   showToast((vertical ? "Alinhamento vertical aplicado" : "Alinhamento horizontal aplicado") + (count > 1 ? " a " + count + " esquemas ligados (cada um separado)." : " ao esquema ligado.") + " Ctrl+Z desfaz.");
 }
+// Pedido do usuário (Ctrl+L): alinha os objetos selecionados MANTENDO a direção de cada ligação -- as que
+// estavam na horizontal continuam na horizontal (mesma altura), as que estavam na vertical continuam
+// na vertical (mesma coluna) -- e com a distância mínima (uniforme em cada direção) entre as formas, para
+// as cardinalidades continuarem visíveis. Sem seleção, vale para todos os objetos do modelo.
+function layoutKeepingDirections(){
+  var selected = Array.from(selectedNodeIds).map(getNode).filter(Boolean);
+  var S = (selected.length ? selected : state.nodes).filter(function(n){
+    return n.type === "entity" || n.type === "relationship" || n.type === "generalization" || n.type === "table";
+  });
+  var inS = {}; S.forEach(function(n){ inS[n.id] = true; });
+  var links = state.edges.filter(function(e){
+    if (!inS[e.from] || !inS[e.to] || e.from === e.to) return false;
+    return e.kind === "participation" || e.kind === "plain" || e.kind === "fk";
+  });
+  if (!links.length){ showToast("Não há objetos ligados entre si para alinhar.", "warn"); return; }
+  var adj = {};
+  links.forEach(function(e){
+    (adj[e.from] = adj[e.from] || []).push(e.to);
+    (adj[e.to] = adj[e.to] || []).push(e.from);
+  });
+  var orig = {};
+  S.forEach(function(n){ var d = computeDims(n); orig[n.id] = { x: centerX(n, d), y: n.y, w: d.w, h: d.h }; });
+  // direção de cada ligação, medida nas posições ORIGINAIS: horizontal quando |dx| >= |dy|
+  // Especialização (generalização): a superclasse fica sempre ACIMA do triângulo e as subclasses ABAIXO,
+  // lado a lado -- qualquer que seja a posição de onde partiram. A superclasse é a entidade mais acima.
+  var superOfGen = {};
+  S.forEach(function(g){
+    if (g.type !== "generalization") return;
+    var nb = (adj[g.id] || []).filter(function(id){ return id in orig; });
+    if (!nb.length) return;
+    nb.sort(function(p, q){ return (orig[p].y - orig[q].y) || (orig[p].x - orig[q].x); });
+    superOfGen[g.id] = nb[0];
+  });
+  // sinal (+1 = abaixo, -1 = acima) de b em relação a a, quando um dos dois é uma generalização; senão null
+  var genSign = function(a, b){
+    if (a in superOfGen) return b === superOfGen[a] ? -1 : 1;
+    if (b in superOfGen) return a === superOfGen[b] ? 1 : -1;
+    return null;
+  };
+  var isH = function(a, b){
+    if (genSign(a, b) !== null) return false;
+    return Math.abs(orig[b].x - orig[a].x) >= Math.abs(orig[b].y - orig[a].y);
+  };
+  var vSign = function(a, b){ var gsn = genSign(a, b); return gsn !== null ? gsn : (orig[b].y >= orig[a].y ? 1 : -1); };
+  // distância uniforme por direção: a maior folga exigida pelos atributos de cada par vale para todos
+  // Base menor que a do Ctrl+AH/AV (CHAIN_GAP): só o necessário para a pílula de cardinalidade caber.
+  var BASE = { h: 40, v: 40 };
+  var D = { h: BASE.h, v: BASE.v };
+  links.forEach(function(e){
+    var a = e.from, b = e.to, horiz = isH(a, b);
+    var first = horiz ? (orig[a].x <= orig[b].x ? a : b) : (vSign(a, b) === 1 ? a : b);
+    var second = first === a ? b : a;
+    var na = getNode(first), nb = getNode(second);
+    var halfA = (horiz ? orig[first].w : orig[first].h) / 2, halfB = (horiz ? orig[second].w : orig[second].h) / 2;
+    var ea = axisExtent(na, !horiz), eb = axisExtent(nb, !horiz);
+    var need = (horiz ? BASE.h : BASE.v) + Math.max(0, ea.after - halfA) + Math.max(0, eb.before - halfB);
+    // Ligação de chave estrangeira tem uma pílula de cardinalidade em CADA ponta (a 25% e a 75% da linha):
+    // na horizontal o vão precisa ser largo o bastante para as duas pílulas não se tocarem.
+    if (e.kind === "fk") need = Math.max(need, horiz ? 100 : 90);
+    if (horiz) D.h = Math.max(D.h, need); else D.v = Math.max(D.v, need);
+  });
+  var placed = {}, count = 0;
+  var treeParent = {}, treeKids = {}, parentHoriz = {}, placeOrder = {}, orderN = 0;
+  var GAP_SIB = 40; // vão entre irmãos que saem do mesmo objeto na mesma direção (ex.: subclasses sob o triângulo)
+  // Subclasses nunca são a âncora do grupo nem pai do triângulo: o triângulo nasce da superclasse, e as subclasses
+  // saem dele (assim ficam irmãs, lado a lado).
+  var isSubclass = {};
+  Object.keys(superOfGen).forEach(function(gid){ (adj[gid] || []).forEach(function(id){ if (id !== superOfGen[gid]) isSubclass[id] = true; }); });
+  S.slice().sort(function(p, q){ return ((isSubclass[p.id] ? 1 : 0) - (isSubclass[q.id] ? 1 : 0)) || (orig[p.id].x - orig[q.id].x) || (orig[p.id].y - orig[q.id].y); }).forEach(function(root){
+    if (placed[root.id] || !adj[root.id]) return;
+    // Fase 1: árvore de ligações (BFS) a partir da âncora = objeto mais à esquerda do grupo (fica onde está)
+    placed[root.id] = true; placeOrder[root.id] = orderN++;
+    var queue = [root.id], group = [root.id];
+    while (queue.length){
+      var cur = queue.shift();
+      (adj[cur] || []).forEach(function(nid){
+        if (placed[nid]) return;
+        if ((nid in superOfGen) && cur !== superOfGen[nid]) return; // uma subclasse não puxa o triângulo
+        placed[nid] = true;
+        treeParent[nid] = cur; (treeKids[cur] = treeKids[cur] || []).push(nid);
+        parentHoriz[nid] = isH(cur, nid); placeOrder[nid] = orderN++;
+        queue.push(nid); group.push(nid);
+      });
+    }
+    // Fase 2: posições de cima para baixo. Filhos que saem do mesmo objeto na MESMA direção (mesmo eixo e
+    // sentido) ficam lado a lado -- em leque, centrados no pai --, em vez de empilhados uns sobre os outros.
+    var pos = {}; pos[root.id] = { x: orig[root.id].x, y: orig[root.id].y };
+    var stack = [root.id];
+    while (stack.length){
+      var pid = stack.pop(), kids = treeKids[pid] || [];
+      var groups = {};
+      kids.forEach(function(k){
+        var h = parentHoriz[k];
+        var sgn = h ? (orig[k].x >= orig[pid].x ? 1 : -1) : vSign(pid, k);
+        var key = (h ? "h" : "v") + sgn;
+        (groups[key] = groups[key] || { horiz:h, sgn:sgn, ids:[] }).ids.push(k);
+      });
+      Object.keys(groups).forEach(function(key){
+        var g = groups[key];
+        // posição ao longo do eixo da ligação
+        g.ids.forEach(function(k){
+          if (g.horiz) pos[k] = { x: pos[pid].x + g.sgn * (orig[pid].w / 2 + D.h + orig[k].w / 2), y: pos[pid].y };
+          else pos[k] = { x: pos[pid].x, y: pos[pid].y + g.sgn * (orig[pid].h / 2 + D.v + orig[k].h / 2) };
+        });
+        if (g.ids.length > 1){
+          // espalha no eixo transversal, na ordem original, com vão GAP_SIB entre as extensões (com atributos)
+          var cross = function(k){ return g.horiz ? orig[k].y : orig[k].x; };
+          var sorted = g.ids.slice().sort(function(a, b){ return cross(a) - cross(b); });
+          var ext = function(k){ var e = axisExtent(getNode(k), g.horiz); return { b: e.before, a: e.after }; };
+          var total = 0;
+          sorted.forEach(function(k, ix){ var e = ext(k); total += e.b + e.a + (ix ? GAP_SIB : 0); });
+          var center = g.horiz ? pos[pid].y : pos[pid].x;
+          var cursor = center - total / 2;
+          sorted.forEach(function(k){
+            var e = ext(k);
+            cursor += e.b;
+            if (g.horiz) pos[k].y = cursor; else pos[k].x = cursor;
+            cursor += e.a + GAP_SIB;
+          });
+        }
+        g.ids.forEach(function(k){ stack.push(k); });
+      });
+    }
+    group.forEach(function(id){
+      moveNodeWithAttributes(getNode(id), pos[id].x - orig[id].x, pos[id].y - orig[id].y);
+    });
+    count++;
+  });
+  // Evita sobreposição: se dois objetos (com seus atributos) se tocam, empurra um deles -- junto com tudo
+  // que depende dele na árvore de ligações, para as ligações seguirem retas -- para fora do outro.
+  var OV = 20;
+  var shapeNodes = state.nodes.filter(function(n){ return n.type === "entity" || n.type === "relationship" || n.type === "generalization" || n.type === "table" || n.type === "note"; });
+  var boxOf = function(n){
+    var list = (n.type === "table" || n.type === "note") ? [n] : [n].concat(collectAttributeDescendants(n.id));
+    var x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    list.forEach(function(m){
+      var d = computeDims(m), cx = centerX(m, d);
+      x1 = Math.min(x1, cx - d.w / 2); x2 = Math.max(x2, cx + d.w / 2);
+      y1 = Math.min(y1, m.y - d.h / 2); y2 = Math.max(y2, m.y + d.h / 2);
+    });
+    return { x1:x1 - OV, y1:y1 - OV, x2:x2 + OV, y2:y2 + OV };
+  };
+  var subtreeOf = function(id){
+    var out = [id], i = 0;
+    while (i < out.length){ (treeKids[out[i]] || []).forEach(function(k){ out.push(k); }); i++; }
+    return out;
+  };
+  var rootOfNode = function(id){ while (treeParent[id] !== undefined) id = treeParent[id]; return id; };
+  var isAncestor = function(a, b){ var c = b; while (c){ if (c === a) return true; c = treeParent[c]; } return false; };
+  for (var pass = 0; pass < 60; pass++){
+    var moved = false;
+    outer:
+    for (var i1 = 0; i1 < shapeNodes.length; i1++){
+      for (var i2 = i1 + 1; i2 < shapeNodes.length; i2++){
+        var A = shapeNodes[i1], B = shapeNodes[i2];
+        var ba = boxOf(A), bb = boxOf(B);
+        if (ba.x1 >= bb.x2 || bb.x1 >= ba.x2 || ba.y1 >= bb.y2 || bb.y1 >= ba.y2) continue;
+        var aS = !!inS[A.id] && (A.id in placeOrder), bS = !!inS[B.id] && (B.id in placeOrder);
+        var mover = null, fixed = null;
+        if (aS && bS){
+          if (isAncestor(A.id, B.id)) { mover = B; fixed = A; }
+          else if (isAncestor(B.id, A.id)) { mover = A; fixed = B; }
+          else if (placeOrder[A.id] > placeOrder[B.id]) { mover = A; fixed = B; }
+          else { mover = B; fixed = A; }
+        } else if (aS){ mover = A; fixed = B; } else if (bS){ mover = B; fixed = A; }
+        else continue;
+        // Outro grupo (ou objeto não selecionado): move o GRUPO INTEIRO do mover, para as ligações dele seguirem retas.
+        var diffGroup = !(fixed.id in placeOrder) || rootOfNode(fixed.id) !== rootOfNode(mover.id);
+        var sub = subtreeOf(diffGroup ? rootOfNode(mover.id) : mover.id);
+        if (sub.indexOf(fixed.id) !== -1) continue;
+        var bm = boxOf(mover), bf = boxOf(fixed);
+        if (diffGroup){
+          // Grupo inteiro: usa a caixa do grupo e empurra só para o lado em que ele já está em relação ao objeto
+          // fixo (assim dois objetos nunca se empurram de volta, indo e voltando).
+          var gb = { x1:Infinity, y1:Infinity, x2:-Infinity, y2:-Infinity };
+          sub.forEach(function(id){ var bx = boxOf(getNode(id)); gb.x1 = Math.min(gb.x1, bx.x1); gb.y1 = Math.min(gb.y1, bx.y1); gb.x2 = Math.max(gb.x2, bx.x2); gb.y2 = Math.max(gb.y2, bx.y2); });
+          // O objeto fixo conta como o GRUPO dele inteiro (se estiver num), para o grupo movido ficar fora de todo ele.
+          if (fixed.id in placeOrder){
+            bf = { x1:Infinity, y1:Infinity, x2:-Infinity, y2:-Infinity };
+            subtreeOf(rootOfNode(fixed.id)).forEach(function(id){ var bx = boxOf(getNode(id)); bf.x1 = Math.min(bf.x1, bx.x1); bf.y1 = Math.min(bf.y1, bx.y1); bf.x2 = Math.max(bf.x2, bx.x2); bf.y2 = Math.max(bf.y2, bx.y2); });
+          }
+          var gcx = (gb.x1 + gb.x2) / 2, gcy = (gb.y1 + gb.y2) / 2, fcx = (bf.x1 + bf.x2) / 2, fcy = (bf.y1 + bf.y2) / 2;
+          var optX = gcx >= fcx ? { dx: bf.x2 - gb.x1, dy: 0 } : { dx: -(gb.x2 - bf.x1), dy: 0 };
+          var optY = gcy >= fcy ? { dx: 0, dy: bf.y2 - gb.y1 } : { dx: 0, dy: -(gb.y2 - bf.y1) };
+          // Pedido do usuário: sobreposição na horizontal (os grupos estão lado a lado em X) -> separa na vertical
+          // (um acima do outro); sobreposição na vertical (um sobre o outro em Y) -> separa na horizontal.
+          var pick = Math.abs(gcx - fcx) >= Math.abs(gcy - fcy) ? optY : optX;
+          sub.forEach(function(id){ moveNodeWithAttributes(getNode(id), pick.dx, pick.dy); });
+          moved = true;
+          break outer;
+        }
+        var opts = [
+          { dx: bf.x2 - bm.x1, dy: 0 }, { dx: -(bm.x2 - bf.x1), dy: 0 },
+          { dx: 0, dy: bf.y2 - bm.y1 }, { dx: 0, dy: -(bm.y2 - bf.y1) }
+        ];
+        // prefere empurrar ao longo do eixo da ligação com o pai (mantém a ligação reta e só a alonga)
+        var ph = parentHoriz[mover.id], best = null;
+        opts.forEach(function(o){
+          var cost = Math.abs(o.dx) + Math.abs(o.dy);
+          var along = !diffGroup && treeParent[mover.id] !== undefined && ((ph && o.dx !== 0) || (!ph && o.dy !== 0));
+          var sameDir = true;
+          if (along){
+            var par = orig[treeParent[mover.id]], me = orig[mover.id];
+            sameDir = ph ? ((me.x >= par.x) === (o.dx > 0)) : ((me.y >= par.y) === (o.dy > 0));
+          }
+          var score = cost * ((along && sameDir) ? 1 : 3);
+          if (!best || score < best.score) best = { dx:o.dx, dy:o.dy, score:score };
+        });
+        sub.forEach(function(id){ moveNodeWithAttributes(getNode(id), best.dx, best.dy); });
+        moved = true;
+        break outer;
+      }
+    }
+    if (!moved){
+      // Ligação (reta) que atravessa um objeto de OUTRO grupo: afasta o grupo da ligação, na perpendicular.
+      var rootOf = function(id){ while (treeParent[id] !== undefined) id = treeParent[id]; return id; };
+      for (var li = 0; li < links.length && !moved; li++){
+        var L = links[li];
+        if (!(L.from in placeOrder) || !(L.to in placeOrder)) continue;
+        var n1 = getNode(L.from), n2 = getNode(L.to);
+        var d1 = computeDims(n1), d2 = computeDims(n2);
+        var p1 = { x: centerX(n1, d1), y: n1.y }, p2 = { x: centerX(n2, d2), y: n2.y };
+        var segH = Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y);
+        var segLo = segH ? Math.min(p1.x, p2.x) : Math.min(p1.y, p2.y), segHi = segH ? Math.max(p1.x, p2.x) : Math.max(p1.y, p2.y);
+        var segAt = segH ? (p1.y + p2.y) / 2 : (p1.x + p2.x) / 2;
+        var myRoot = rootOf(L.from);
+        for (var ci = 0; ci < shapeNodes.length && !moved; ci++){
+          var C = shapeNodes[ci];
+          if (C.id === L.from || C.id === L.to) continue;
+          if ((C.id in placeOrder) && rootOf(C.id) === myRoot) continue; // mesmo grupo (ciclo): não mexe
+          var dc = computeDims(C), ccx = centerX(C, dc);
+          var cx1 = ccx - dc.w / 2 - OV, cx2 = ccx + dc.w / 2 + OV, cy1 = C.y - dc.h / 2 - OV, cy2 = C.y + dc.h / 2 + OV;
+          var along1 = segH ? cx1 : cy1, along2 = segH ? cx2 : cy2, cross1 = segH ? cy1 : cx1, cross2 = segH ? cy2 : cx2;
+          if (segHi <= along1 || segLo >= along2 || segAt <= cross1 || segAt >= cross2) continue;
+          var up = cross2 - segAt, down = segAt - cross1; // empurrar o grupo para o lado (+) ou (-)
+          var push = up <= down ? up : -down;
+          var gsub = subtreeOf(myRoot);
+          gsub.forEach(function(id){ moveNodeWithAttributes(getNode(id), segH ? 0 : push, segH ? push : 0); });
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+  pendingAdd = null;
+  render();
+  showToast("Objetos alinhados mantendo a direção das ligações" + (count > 1 ? " (" + count + " grupos)." : ".") + " Ctrl+Z desfaz.");
+}
 function layoutModelPart(vertical, entities, connectors, membersOf){
   var attrMode = vertical ? "right" : "top";
   // 1) atributos para o lado escolhido (antes de medir as extensões)
@@ -5466,9 +5714,18 @@ document.addEventListener("keydown", function(e){
         timer: setTimeout(function(){
           alignShortcutPending = null;
           if (alignShortcutTarget) applyAttributeAlignCycleShortcut(alignShortcutTarget);
+          // Pedido do usuário: Ctrl+A sozinho (sem uma segunda letra H/V/J/E/D/C/B) e sem uma única
+          // entidade/relacionamento selecionado seleciona todos os objetos do modelo.
+          else if (!physicalActive && !dictActive && !pendingAdd && !connectMode) selectAllObjects();
         }, 700)
       };
     }
+  } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "l" || e.key === "L") && !inField){
+    // Pedido do usuário: Ctrl+L alinha os objetos selecionados mantendo a direção de cada ligação (horizontal
+    // continua horizontal, vertical continua vertical) e a distância mínima entre entidades e relacionamentos
+    // para as cardinalidades continuarem visíveis (ver CHAIN_GAP / layoutModelPart).
+    e.preventDefault(); // também evita o atalho do navegador (foco na barra de endereço)
+    if (!physicalActive && !dictActive && !pendingAdd && !connectMode) layoutKeepingDirections();
   } else if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === "KeyS" && !inField){
     // Ctrl+Alt+S seleciona todos os objetos do modelo (pedido do usuário).
     e.preventDefault();
