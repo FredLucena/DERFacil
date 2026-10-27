@@ -4514,6 +4514,24 @@ function layoutKeepingDirections(){
           var cross = function(k){ return g.horiz ? orig[k].y : orig[k].x; };
           var sorted = g.ids.slice().sort(function(a, b){ return cross(a) - cross(b); });
           var ext = function(k){ var e = axisExtent(getNode(k), g.horiz); return { b: e.before, a: e.after }; };
+          if (!g.horiz && (pid in superOfGen)){
+            // Especialização: o alinhamento parte da entidade MAIS CENTRAL em relação ao triângulo -- com número
+            // ímpar, a do meio fica exatamente sob o triângulo; com número par, as duas do meio ficam
+            // simétricas -- e as demais se afastam para os lados, na ordem original, com o vão GAP_SIB.
+            var nS = sorted.length, cx0 = pos[pid].x, xs = new Array(nS), mid;
+            if (nS % 2){
+              mid = (nS - 1) / 2; xs[mid] = cx0;
+              for (var r1 = mid + 1; r1 < nS; r1++) xs[r1] = xs[r1 - 1] + ext(sorted[r1 - 1]).a + GAP_SIB + ext(sorted[r1]).b;
+              for (var l1 = mid - 1; l1 >= 0; l1--) xs[l1] = xs[l1 + 1] - ext(sorted[l1 + 1]).b - GAP_SIB - ext(sorted[l1]).a;
+            } else {
+              mid = nS / 2;
+              var half = (ext(sorted[mid - 1]).a + GAP_SIB + ext(sorted[mid]).b) / 2;
+              xs[mid - 1] = cx0 - half; xs[mid] = cx0 + half;
+              for (var r2 = mid + 1; r2 < nS; r2++) xs[r2] = xs[r2 - 1] + ext(sorted[r2 - 1]).a + GAP_SIB + ext(sorted[r2]).b;
+              for (var l2 = mid - 2; l2 >= 0; l2--) xs[l2] = xs[l2 + 1] - ext(sorted[l2 + 1]).b - GAP_SIB - ext(sorted[l2]).a;
+            }
+            sorted.forEach(function(k, ix){ pos[k].x = xs[ix]; });
+          } else {
           var total = 0;
           sorted.forEach(function(k, ix){ var e = ext(k); total += e.b + e.a + (ix ? GAP_SIB : 0); });
           var center = g.horiz ? pos[pid].y : pos[pid].x;
@@ -4524,6 +4542,7 @@ function layoutKeepingDirections(){
             if (g.horiz) pos[k].y = cursor; else pos[k].x = cursor;
             cursor += e.a + GAP_SIB;
           });
+          }
         }
         g.ids.forEach(function(k){ stack.push(k); });
       });
