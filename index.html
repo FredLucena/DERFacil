@@ -4439,9 +4439,21 @@ function layoutKeepingDirections(){
     superOfGen[g.id] = nb[0];
   });
   // sinal (+1 = abaixo, -1 = acima) de b em relação a a, quando um dos dois é uma generalização; senão null
+  // No modelo LÓGICO, a especialização vira uma ligação FK com cardinalidade (0,1) do lado da tabela que tem a FK
+  // (a subclasse) e (1,1) do lado da referenciada (a superclasse): a superclasse fica acima, as subclasses abaixo.
+  var specSuper = {}, specKids = {};
+  links.forEach(function(e){
+    if (e.kind !== "fk" || !e.cardChild || !e.cardParent) return;
+    if (e.cardChild.min === "0" && e.cardChild.max === "1" && e.cardParent.min === "1" && e.cardParent.max === "1"){
+      specSuper[e.from] = e.to;
+      (specKids[e.to] = specKids[e.to] || []).push(e.from);
+    }
+  });
   var genSign = function(a, b){
     if (a in superOfGen) return b === superOfGen[a] ? -1 : 1;
     if (b in superOfGen) return a === superOfGen[b] ? 1 : -1;
+    if (specSuper[a] === b) return -1;   // b é a superclasse de a: fica acima
+    if (specSuper[b] === a) return 1;    // b é subclasse de a: fica abaixo
     return null;
   };
   var isH = function(a, b){
@@ -4473,6 +4485,7 @@ function layoutKeepingDirections(){
   // saem dele (assim ficam irmãs, lado a lado).
   var isSubclass = {};
   Object.keys(superOfGen).forEach(function(gid){ (adj[gid] || []).forEach(function(id){ if (id !== superOfGen[gid]) isSubclass[id] = true; }); });
+  Object.keys(specSuper).forEach(function(id){ isSubclass[id] = true; });
   S.slice().sort(function(p, q){ return ((isSubclass[p.id] ? 1 : 0) - (isSubclass[q.id] ? 1 : 0)) || (orig[p.id].x - orig[q.id].x) || (orig[p.id].y - orig[q.id].y); }).forEach(function(root){
     if (placed[root.id] || !adj[root.id]) return;
     // Fase 1: árvore de ligações (BFS) a partir da âncora = objeto mais à esquerda do grupo (fica onde está)
@@ -4483,6 +4496,7 @@ function layoutKeepingDirections(){
       (adj[cur] || []).forEach(function(nid){
         if (placed[nid]) return;
         if ((nid in superOfGen) && cur !== superOfGen[nid]) return; // uma subclasse não puxa o triângulo
+        if (specSuper[cur] === nid) return; // nem a tabela subclasse puxa a sua superclasse
         placed[nid] = true;
         treeParent[nid] = cur; (treeKids[cur] = treeKids[cur] || []).push(nid);
         parentHoriz[nid] = isH(cur, nid); placeOrder[nid] = orderN++;
@@ -4514,7 +4528,7 @@ function layoutKeepingDirections(){
           var cross = function(k){ return g.horiz ? orig[k].y : orig[k].x; };
           var sorted = g.ids.slice().sort(function(a, b){ return cross(a) - cross(b); });
           var ext = function(k){ var e = axisExtent(getNode(k), g.horiz); return { b: e.before, a: e.after }; };
-          if (!g.horiz && (pid in superOfGen)){
+          if (!g.horiz && g.sgn === 1 && ((pid in superOfGen) || (pid in specKids))){
             // Especialização: o alinhamento parte da entidade MAIS CENTRAL em relação ao triângulo -- com número
             // ímpar, a do meio fica exatamente sob o triângulo; com número par, as duas do meio ficam
             // simétricas -- e as demais se afastam para os lados, na ordem original, com o vão GAP_SIB.
@@ -6845,6 +6859,37 @@ function slugColumnName(name){
     .replace(/[^a-z0-9]+/g, "_").replace(/(^_|_$)/g, "") || "campo";
 }
 
+// Pedido do usuário: ao gerar o modelo lógico, as tabelas ficam nas MESMAS posições das entidades e relacionamentos
+// que lhes deram origem (cada nó já nasce com x,y do original). Como as tabelas são bem maiores, o conjunto todo
+// é ampliado só o suficiente (fator mínimo) para nenhuma tabela tocar em outra -- assim a disposição relativa
+// (quem está à esquerda, acima etc.) se mantém. Se mesmo ampliando muito ainda houver sobreposição (ex.: dois
+// nós de origem na mesma posição), usa a grade simples de autoLayoutTables.
+function placeTablesLikeOrigins(nodes){
+  if (!nodes.length) return;
+  var MARGIN = 70; // vão mínimo entre as bordas (cabem as pílulas de cardinalidade das duas pontas)
+  var dims = nodes.map(computeDims);
+  var ox = nodes.map(function(n){ return n.x; }), oy = nodes.map(function(n){ return n.y; });
+  var hasOverlap = function(sc){
+    for (var i = 0; i < nodes.length; i++){
+      for (var j = i + 1; j < nodes.length; j++){
+        var dx = Math.abs((ox[i] - ox[j]) * sc), dy = Math.abs((oy[i] - oy[j]) * sc);
+        if (dx < (dims[i].w + dims[j].w) / 2 + MARGIN && dy < (dims[i].h + dims[j].h) / 2 + MARGIN) return true;
+      }
+    }
+    return false;
+  };
+  var sc = 1;
+  while (hasOverlap(sc) && sc < 8) sc += 0.02;
+  if (hasOverlap(sc)){ autoLayoutTables(nodes); return; }
+  var iMinX = 0, iMinY = 0;
+  nodes.forEach(function(n, i){ if (ox[i] < ox[iMinX]) iMinX = i; if (oy[i] < oy[iMinY]) iMinY = i; });
+  var startX = 100 + dims[iMinX].w / 2, startY = 100 + dims[iMinY].h / 2;
+  nodes.forEach(function(n, i){
+    n.x = startX + (ox[i] - ox[iMinX]) * sc;
+    n.y = startY + (oy[i] - oy[iMinY]) * sc;
+  });
+}
+
 // Posiciona as tabelas geradas numa grade simples (ordem em que foram criadas), já que suas
 // caixas são bem maiores que os nós conceituais de origem e reaproveitar as coordenadas antigas
 // deixaria tudo sobreposto. O usuário pode reorganizar arrastando depois.
@@ -7199,7 +7244,7 @@ function convertConceptualToLogical(conceptual){
     t.columns = pkCols.concat(otherCols);
   });
 
-  autoLayoutTables(logical.nodes);
+  placeTablesLikeOrigins(logical.nodes);
   return logical;
 }
 
@@ -8775,7 +8820,7 @@ var SHORTCUT_HELP = [
     [["Ctrl+AH"], "Alinhamento horizontal do modelo: todos os esquemas ligados, ou só os que contêm os objetos selecionados."],
     [["Ctrl+AJ"], "Ajusta a tela (zoom) para mostrar todo o modelo, igual ao botão de ajustar tela."],
     [["Ctrl+A"], "Com uma única entidade ou relacionamento selecionado, sozinho: aplica o próximo alinhamento de atributos da sequência a cada vez."],
-    [["Ctrl+L"], "Alinha os objetos selecionados (ou todos, sem seleção) mantendo a direção de cada ligação: o que estava na horizontal continua na horizontal e o que estava na vertical, na vertical. Usa a distância mínima entre os objetos (as cardinalidades continuam visíveis), evita sobreposição e, nas especializações, deixa as subclasses lado a lado sob o triângulo, a mais central sob ele. Vale nos modelos conceitual e lógico."],
+    [["Ctrl+L"], "Alinha os objetos selecionados (ou todos, sem seleção) mantendo a direção de cada ligação: o que estava na horizontal continua na horizontal e o que estava na vertical, na vertical. Usa a distância mínima entre os objetos (as cardinalidades continuam visíveis), evita sobreposição e, nas especializações, deixa as subclasses lado a lado sob o triângulo, a mais central sob ele (no modelo lógico, as tabelas ligadas por (1,1) e (0,1) ficam abaixo da tabela da superclasse, também lado a lado). Vale nos modelos conceitual e lógico."],
     [["Botão direito"], "Sobre uma entidade ou relacionamento: abre o menu de alinhamento de atributos e de alinhamento vertical/horizontal do modelo."]
   ]},
   { title: "Mouse e quadro", rows: [
