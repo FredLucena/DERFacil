@@ -8760,20 +8760,22 @@ var SHORTCUT_HELP = [
   ]},
   { title: "Edição de elementos", rows: [
     [["Delete", "Backspace"], "Exclui os elementos ou conexões selecionados."],
-    [["Ctrl+Alt+S"], "Seleciona todos os objetos do modelo (S de \"Selecionar\")."],
+    [["Ctrl+A"], "Seleciona todos os objetos do modelo (conceitual ou lógico), cerca de 0,7 s depois, se nenhuma segunda letra for apertada. Com uma única entidade ou relacionamento selecionado, o Ctrl+A segue como início dos atalhos de alinhamento."],
+    [["Ctrl+Alt+S"], "Seleciona todos os objetos do modelo na hora (S de \"Selecionar\")."],
     [["Ctrl+C"], "Copia os elementos selecionados."],
     [["Ctrl+V"], "Cola os elementos copiados (no mesmo modelo em que foram copiados)."],
     [["Qualquer letra"], "Com um único elemento selecionado, começa a renomeá-lo: a letra substitui o nome e o cursor vai para o campo Nome."]
   ]},
-  { title: "Alinhar atributos (um ou vários elementos selecionados)", rows: [
+  { title: "Alinhar atributos e organizar o modelo", rows: [
     [["Ctrl+AE"], "Alinha os atributos à esquerda."],
     [["Ctrl+AD"], "Alinha os atributos à direita."],
     [["Ctrl+AC"], "Alinha os atributos acima."],
     [["Ctrl+AB"], "Alinha os atributos abaixo."],
-    [["Ctrl+AV"], "Alinhamento vertical do modelo inteiro (não depende da seleção)."],
-    [["Ctrl+AH"], "Alinhamento horizontal do modelo inteiro (não depende da seleção)."],
+    [["Ctrl+AV"], "Alinhamento vertical do modelo: todos os esquemas ligados, ou só os que contêm os objetos selecionados."],
+    [["Ctrl+AH"], "Alinhamento horizontal do modelo: todos os esquemas ligados, ou só os que contêm os objetos selecionados."],
     [["Ctrl+AJ"], "Ajusta a tela (zoom) para mostrar todo o modelo, igual ao botão de ajustar tela."],
-    [["Ctrl+A"], "Sozinho: aplica o próximo alinhamento da sequência a cada vez."],
+    [["Ctrl+A"], "Com uma única entidade ou relacionamento selecionado, sozinho: aplica o próximo alinhamento de atributos da sequência a cada vez."],
+    [["Ctrl+L"], "Alinha os objetos selecionados (ou todos, sem seleção) mantendo a direção de cada ligação: o que estava na horizontal continua na horizontal e o que estava na vertical, na vertical. Usa a distância mínima entre os objetos (as cardinalidades continuam visíveis), evita sobreposição e, nas especializações, deixa as subclasses lado a lado sob o triângulo, a mais central sob ele. Vale nos modelos conceitual e lógico."],
     [["Botão direito"], "Sobre uma entidade ou relacionamento: abre o menu de alinhamento de atributos e de alinhamento vertical/horizontal do modelo."]
   ]},
   { title: "Mouse e quadro", rows: [
