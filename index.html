@@ -224,6 +224,8 @@
   /* Pedido do usuário: a janela de seleção de modelo abre alinhada à esquerda do botão (o botão
      fica no canto superior esquerdo), em vez de alinhada à direita como os demais .dl-menu. */
   .mode-menu{ width:250px; left:0; right:auto; }
+  .stage-ctx-menu{ position:fixed; right:auto; top:auto; width:230px; z-index:600; }
+
   .mode-menu-item{ align-items:center; font-size:13px; justify-content:space-between; gap:10px; }
   .mode-menu-item.active{ background:var(--accent-fill); color:var(--accent-ink); font-weight:600; }
   .mode-menu-item-label{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -5186,6 +5188,63 @@ function showAttributeAlignMenu(entity, opts){
   });
 }
 
+// Pedido do usuário: botão direito numa ÁREA VAZIA do quadro abre um menu popup (junto do cursor) com
+// "Selecionar todos" (Ctrl+A) e "Alinhar objetos" (Ctrl+L), cada um com o respectivo atalho à direita.
+var stageCtxMenuEl = null;
+function closeStageContextMenu(){
+  if (!stageCtxMenuEl) return;
+  stageCtxMenuEl.remove(); stageCtxMenuEl = null;
+  document.removeEventListener("pointerdown", onStageCtxOutside, true);
+  document.removeEventListener("keydown", onStageCtxKey, true);
+  window.removeEventListener("blur", closeStageContextMenu);
+  window.removeEventListener("resize", closeStageContextMenu);
+}
+function onStageCtxOutside(e){ if (stageCtxMenuEl && !stageCtxMenuEl.contains(e.target)) closeStageContextMenu(); }
+function onStageCtxKey(e){ if (e.key === "Escape"){ e.stopPropagation(); closeStageContextMenu(); } }
+function showStageContextMenu(x, y){
+  closeStageContextMenu();
+  var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  var mod = isMac ? "Cmd" : "Ctrl";
+  var menu = document.createElement("div");
+  menu.className = "dl-menu stage-ctx-menu";
+  menu.setAttribute("role", "menu");
+  menu.innerHTML = '<div class="dl-menu-panel">' +
+    '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="select-all"><span class="mode-menu-item-label">Selecionar todos</span><span class="mode-menu-item-shortcut">' + mod + '+A</span></button>' +
+    '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="align"><span class="mode-menu-item-label">Alinhar objetos</span><span class="mode-menu-item-shortcut">' + mod + '+L</span></button>' +
+    '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="fit"><span class="mode-menu-item-label">Ajustar tela</span><span class="mode-menu-item-shortcut">' + mod + '+AJ</span></button>' +
+    '</div>';
+  document.body.appendChild(menu);
+  stageCtxMenuEl = menu;
+  // posição junto do cursor, sem sair da janela
+  var w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(4, Math.min(x, window.innerWidth - w - 4)) + "px";
+  menu.style.top = Math.max(4, Math.min(y, window.innerHeight - h - 4)) + "px";
+  menu.querySelector('[data-a="select-all"]').addEventListener("click", function(){
+    closeStageContextMenu();
+    selectAllObjects();
+  });
+  menu.querySelector('[data-a="align"]').addEventListener("click", function(){
+    closeStageContextMenu();
+    layoutKeepingDirections();
+  });
+  menu.querySelector('[data-a="fit"]').addEventListener("click", function(){
+    closeStageContextMenu();
+    fitToContent();
+  });
+  document.addEventListener("pointerdown", onStageCtxOutside, true);
+  document.addEventListener("keydown", onStageCtxKey, true);
+  window.addEventListener("blur", closeStageContextMenu);
+  window.addEventListener("resize", closeStageContextMenu);
+}
+stageEl.addEventListener("contextmenu", function(e){
+  // só em área vazia: sobre um objeto/ligação (ou outro botão direito já tratado) segue o comportamento deles
+  if (e.defaultPrevented) return;
+  if (e.target.closest && e.target.closest("#nodesGroup, #edgesGroup")) return;
+  e.preventDefault();
+  if (physicalActive || dictActive || pendingAdd || connectMode) return;
+  showStageContextMenu(e.clientX, e.clientY);
+});
+
 // ---------- toque com dois dedos no quadro (pinça para dar zoom) ----------
 // O arraste com um dedo só já funciona sozinho: o gesto de clicar-e-arrastar abaixo usa
 // Pointer Events, que o navegador já unifica entre mouse e toque, então arrastar formas ou
@@ -8824,6 +8883,7 @@ var SHORTCUT_HELP = [
     [["Botão direito"], "Sobre uma entidade ou relacionamento: abre o menu de alinhamento de atributos e de alinhamento vertical/horizontal do modelo."]
   ]},
   { title: "Mouse e quadro", rows: [
+    [["Botão direito (área vazia)"], "Abre um menu com \"Selecionar todos\" (Ctrl+A), \"Alinhar objetos\" (Ctrl+L) e \"Ajustar tela\" (Ctrl+AJ)."],
     [["Roda do mouse"], "Aproxima ou afasta o zoom."],
     [["Espaço + arrastar", "Botão do meio"], "Move o quadro (panorâmica)."],
     [["Shift + arrastar"], "Num ponto vazio do quadro: seleciona em laço os elementos dentro do retângulo."],
