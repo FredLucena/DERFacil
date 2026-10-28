@@ -5212,6 +5212,8 @@ function showStageContextMenu(x, y){
     '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="select-all"><span class="mode-menu-item-label">Selecionar todos</span><span class="mode-menu-item-shortcut">' + mod + '+A</span></button>' +
     '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="align"><span class="mode-menu-item-label">Alinhar objetos</span><span class="mode-menu-item-shortcut">' + mod + '+L</span></button>' +
     '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="fit"><span class="mode-menu-item-label">Ajustar tela</span><span class="mode-menu-item-shortcut">' + mod + '+AJ</span></button>' +
+    '<hr class="dl-menu-divider">' +
+    '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="about"><span class="mode-menu-item-label">Sobre</span></button>' +
     '</div>';
   document.body.appendChild(menu);
   stageCtxMenuEl = menu;
@@ -5226,6 +5228,10 @@ function showStageContextMenu(x, y){
   menu.querySelector('[data-a="align"]').addEventListener("click", function(){
     closeStageContextMenu();
     layoutKeepingDirections();
+  });
+  menu.querySelector('[data-a="about"]').addEventListener("click", function(){
+    closeStageContextMenu();
+    showAboutModal();
   });
   menu.querySelector('[data-a="fit"]').addEventListener("click", function(){
     closeStageContextMenu();
