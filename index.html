@@ -1925,8 +1925,17 @@ function askNumberPrompt(title, msg, defaultValue, minValue, maxValue, fieldLabe
     backdrop.querySelector('[data-a="cancel"]').addEventListener("click", function(){ cleanup(null); });
     backdrop.querySelector('[data-a="ok"]').addEventListener("click", submit);
     function cleanup(v){ backdrop.remove(); resolve(v); }
-    input.focus();
-    input.select();
+    // O clique/soltura do mouse que abriu a janela ainda termina DEPOIS desta função e devolve o foco ao
+    // quadro -- por isso o foco (com o número já selecionado, pronto para digitar por cima) é dado agora e de
+    // novo logo em seguida.
+    function focusInput(){
+      if (!backdrop.isConnected) return;
+      input.focus();
+      input.select();
+    }
+    focusInput();
+    setTimeout(focusInput, 0);
+    setTimeout(focusInput, 80);
   });
 }
 
