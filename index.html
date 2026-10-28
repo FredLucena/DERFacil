@@ -4465,7 +4465,7 @@ function layoutKeepingDirections(){
   var vSign = function(a, b){ var gsn = genSign(a, b); return gsn !== null ? gsn : (orig[b].y >= orig[a].y ? 1 : -1); };
   // distância uniforme por direção: a maior folga exigida pelos atributos de cada par vale para todos
   // Base menor que a do Ctrl+AH/AV (CHAIN_GAP): só o necessário para a pílula de cardinalidade caber.
-  var BASE = { h: 40, v: 40 };
+  var BASE = { h: CHAIN_GAP, v: CHAIN_GAP }; // mesma distância do Ctrl+AH/AV
   var D = { h: BASE.h, v: BASE.v };
   links.forEach(function(e){
     var a = e.from, b = e.to, horiz = isH(a, b);
