@@ -7885,7 +7885,7 @@ function projectFileBase(){
 
 // Extensão -> tipo MIME, usada só para sugerir o tipo certo na janela nativa "Salvar como"
 // (showSaveFilePicker, abaixo) -- não afeta os outros dois caminhos de download.
-var SAVE_PICKER_MIME_BY_EXT = { json:"application/json", jpg:"image/jpeg", jpeg:"image/jpeg", pdf:"application/pdf", html:"text/html" };
+var SAVE_PICKER_MIME_BY_EXT = { json:"application/json", jpg:"image/jpeg", jpeg:"image/jpeg", pdf:"application/pdf", html:"text/html", sql:"text/plain", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
 
 // Abre a janela nativa "Salvar como" (showSaveFilePicker) o quanto antes -- ANTES de qualquer
 // trabalho assíncrono mais lento, como o fetch() que "Baixar DER Fácil" faz pra buscar uma cópia
@@ -8209,7 +8209,201 @@ function ensureJsPDF(){
   return jsPDFReadyPromise;
 }
 
+// Modelo Físico: o "diagrama" é o texto SQL, então salva o texto (.sql) ou um PDF paginado com ele.
+async function exportPhysicalSql(fmt){
+  var filename = projectFileBase() + "." + fmt;
+  var isPdf = fmt === "pdf";
+  var msgs = {
+    saved: (isPdf ? "PDF baixado" : "SQL baixado") + " como " + filename + ".",
+    delivered: isPdf ? "PDF enviado." : "SQL enviado.",
+    failed: "Não foi possível gerar o " + (isPdf ? "PDF" : "arquivo SQL") + " agora."
+  };
+  var nativeWriter = await tryNativeSavePicker(filename);
+  if (nativeWriter === SAVE_CANCELLED) return;
+  try {
+    var ta = document.getElementById("sqlOutput");
+    var text = (ta && ta.value) || physicalSql || "";
+    if (!isPdf){
+      await downloadFile(filename, new Blob([text], { type: "text/plain;charset=utf-8" }), msgs, nativeWriter);
+      return;
+    }
+    var JsPDFCtor = await ensureJsPDF();
+    var doc = new JsPDFCtor({ orientation: "p", unit: "pt", format: "a4" });
+    var margin = 40, lineH = 12, pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight();
+    doc.setFont("courier", "normal"); doc.setFontSize(9);
+    var y = margin;
+    text.replace(/\t/g, "  ").split(/\r?\n/).forEach(function(line){
+      var parts = doc.splitTextToSize(line === "" ? " " : line, pageW - margin * 2);
+      parts.forEach(function(part){
+        if (y > pageH - margin){ doc.addPage(); y = margin; }
+        doc.text(part, margin, y);
+        y += lineH;
+      });
+    });
+    await downloadFile(filename, doc.output("blob"), msgs, nativeWriter);
+  } catch (err){
+    showToast(msgs.failed, "warn");
+  }
+}
+
+// ---------- Dicionário de Dados: JPG, PDF e XLSX ----------
+var xlsxReadyPromise = null;
+function ensureXLSX(){
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (xlsxReadyPromise) return xlsxReadyPromise;
+  xlsxReadyPromise = new Promise(function(resolve, reject){
+    var sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    sc.onload = function(){ window.XLSX ? resolve(window.XLSX) : reject(new Error("XLSX indisponível")); };
+    sc.onerror = function(){ xlsxReadyPromise = null; reject(new Error("Não foi possível carregar a biblioteca de planilhas")); };
+    document.head.appendChild(sc);
+  });
+  return xlsxReadyPromise;
+}
+// ExcelJS (permite formatação: cores, bordas, negrito, quebra de linha); o SheetJS acima fica como reserva.
+var exceljsReadyPromise = null;
+function ensureExcelJS(){
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (exceljsReadyPromise) return exceljsReadyPromise;
+  exceljsReadyPromise = new Promise(function(resolve, reject){
+    var sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+    sc.onload = function(){ window.ExcelJS ? resolve(window.ExcelJS) : reject(new Error("ExcelJS indisponível")); };
+    sc.onerror = function(){ exceljsReadyPromise = null; reject(new Error("Não foi possível carregar a biblioteca de planilhas")); };
+    document.head.appendChild(sc);
+  });
+  return exceljsReadyPromise;
+}
+async function buildDictionaryXlsxBlob(){
+  var mime = SAVE_PICKER_MIME_BY_EXT.xlsx;
+  var E = null;
+  try { E = await ensureExcelJS(); } catch (e){ E = null; }
+  if (E){
+    var wb = new E.Workbook();
+    var ws = wb.addWorksheet("Dicionário de Dados");
+    [22, 24, 18, 30, 44, 34].forEach(function(w, i){ ws.getColumn(i + 1).width = w; });
+    var thin = { style: "thin", color: { argb: "FF9A927E" } };
+    var border = { top: thin, left: thin, bottom: thin, right: thin };
+    var rowNo = 0;
+    dictionaryGroups().forEach(function(g, gi){
+      if (gi){ ws.addRow([]); rowNo++; }
+      var all = [DICT_HEADERS].concat(dictionaryRows.slice(g.start, g.end + 1));
+      all.forEach(function(r, ri){
+        var row = ws.addRow(r.map(function(v){ return v == null ? "" : String(v); }));
+        rowNo++;
+        row.eachCell({ includeEmpty: true }, function(cell){
+          cell.border = border;
+          cell.alignment = { vertical: "top", wrapText: true };
+          cell.font = { name: "Arial", size: 11, bold: ri === 0, color: { argb: "FF1F1B14" } };
+          if (ri === 0) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE9E2D0" } };
+        });
+      });
+    });
+    var buf = await wb.xlsx.writeBuffer();
+    return new Blob([buf], { type: mime });
+  }
+  var X = await ensureXLSX();
+  var aoa = [];
+  dictionaryGroups().forEach(function(g, gi){
+    if (gi) aoa.push([]);
+    aoa.push(DICT_HEADERS);
+    dictionaryRows.slice(g.start, g.end + 1).forEach(function(r){ aoa.push(r.map(function(v){ return v == null ? "" : String(v); })); });
+  });
+  var ws2 = X.utils.aoa_to_sheet(aoa);
+  ws2["!cols"] = [22, 24, 18, 30, 44, 34].map(function(w){ return { wch: w }; });
+  var wb2 = X.utils.book_new();
+  X.utils.book_append_sheet(wb2, ws2, "Dicionário de Dados");
+  return new Blob([X.write(wb2, { bookType: "xlsx", type: "array" })], { type: mime });
+}
+// Desenha todas as tabelas do dicionário (uma abaixo da outra, cada uma com seu cabeçalho) num canvas,
+// sempre em cores claras (independente do tema da tela).
+function renderDictionaryToCanvas(scale){
+  var COLW = [130, 160, 120, 190, 280, 210], PAD = 8, LH = 16, GAP = 26, M = 24;
+  var FONT = "13px Arial, Helvetica, sans-serif", FONTB = "bold 13px Arial, Helvetica, sans-serif";
+  var W = COLW.reduce(function(a, b){ return a + b; }, 0) + M * 2;
+  var mc = document.createElement("canvas").getContext("2d");
+  function wrap(text, width, font){
+    mc.font = font;
+    var out = [];
+    String(text == null ? "" : text).split(/\r?\n/).forEach(function(par){
+      var words = par.split(" "), line = "";
+      words.forEach(function(w){
+        var t = line ? line + " " + w : w;
+        if (mc.measureText(t).width <= width || !line){ line = t; }
+        else { out.push(line); line = w; }
+      });
+      out.push(line);
+    });
+    return out;
+  }
+  var tables = dictionaryGroups().map(function(g){
+    var rows = [DICT_HEADERS].concat(dictionaryRows.slice(g.start, g.end + 1)).map(function(r, ri){
+      var cells = r.map(function(v, ci){ return wrap(v, COLW[ci] - PAD * 2, ri === 0 ? FONTB : FONT); });
+      var n = Math.max.apply(null, cells.map(function(c){ return c.length; }));
+      return { cells: cells, h: n * LH + PAD * 2, head: ri === 0 };
+    });
+    return rows;
+  });
+  var H = M * 2 - GAP;
+  tables.forEach(function(t){ H += GAP + t.reduce(function(a, r){ return a + r.h; }, 0); });
+  var canvas = document.createElement("canvas");
+  canvas.width = Math.round(W * scale); canvas.height = Math.round(H * scale);
+  var ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = "top"; ctx.lineWidth = 1;
+  var y = M;
+  tables.forEach(function(t){
+    t.forEach(function(r){
+      var x = M;
+      r.cells.forEach(function(lines, ci){
+        ctx.fillStyle = r.head ? "#e9e2d0" : "#ffffff"; ctx.fillRect(x, y, COLW[ci], r.h);
+        ctx.strokeStyle = "#9a927e"; ctx.strokeRect(x + 0.5, y + 0.5, COLW[ci], r.h);
+        ctx.fillStyle = "#1f1b14"; ctx.font = r.head ? FONTB : FONT;
+        lines.forEach(function(l, li){ ctx.fillText(l, x + PAD, y + PAD + li * LH); });
+        x += COLW[ci];
+      });
+      y += r.h;
+    });
+    y += GAP;
+  });
+  return canvas;
+}
+async function exportDictionary(fmt){
+  var filename = projectFileBase() + "-dicionario-de-dados." + fmt;
+  var label = fmt === "xlsx" ? "Planilha" : (fmt === "pdf" ? "PDF" : "Imagem");
+  var msgs = {
+    saved: label + " baixado como " + filename + ".",
+    delivered: label + " enviado.",
+    failed: "Não foi possível gerar o " + fmt.toUpperCase() + " do dicionário agora."
+  };
+  if (!dictionaryRows || !dictionaryRows.length){ showToast("O Dicionário de Dados está vazio.", "warn"); return; }
+  var nativeWriter = await tryNativeSavePicker(filename);
+  if (nativeWriter === SAVE_CANCELLED) return;
+  try {
+    if (fmt === "xlsx"){
+      await downloadFile(filename, await buildDictionaryXlsxBlob(), msgs, nativeWriter);
+      return;
+    }
+    var canvas = renderDictionaryToCanvas(2);
+    if (fmt === "jpg"){
+      var blob = await new Promise(function(resolve){ canvas.toBlob(resolve, "image/jpeg", 0.92); });
+      if (!blob) throw new Error("toBlob falhou");
+      await downloadFile(filename, blob, msgs, nativeWriter);
+    } else {
+      var JsPDFCtor = await ensureJsPDF();
+      var doc = new JsPDFCtor({ orientation: canvas.width >= canvas.height ? "l" : "p", unit: "px", format: [canvas.width, canvas.height] });
+      doc.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, canvas.width, canvas.height);
+      await downloadFile(filename, doc.output("blob"), msgs, nativeWriter);
+    }
+  } catch (err){
+    showToast(msgs.failed, "warn");
+  }
+}
+
 async function exportProjectImage(fmt){
+  if (dictActive) return exportDictionary(fmt);
+  if (physicalActive && !dictActive && (fmt === "sql" || fmt === "pdf")) return exportPhysicalSql(fmt);
   var filename = projectFileBase() + "." + fmt;
   var isPdf = fmt === "pdf";
   var msgs = {
@@ -8786,8 +8980,11 @@ function renderModeMenuPanel(){
     '<button type="button" class="dl-menu-item mode-menu-item mode-menu-save" aria-haspopup="true" aria-expanded="false"><span class="mode-menu-item-label">Salvar</span>' +
     '<svg class="dl-menu-caret-right" viewBox="0 0 6 10" width="6" height="10"><path d="M1 1l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
     '<div class="mode-menu-savesub" hidden>' +
-    '<button type="button" class="dl-menu-item mode-menu-item" data-save="jpg"><span class="mode-menu-item-label">JPG</span></button>' +
-    '<button type="button" class="dl-menu-item mode-menu-item" data-save="pdf"><span class="mode-menu-item-label">PDF</span></button></div>';
+    (physicalActive && !dictActive
+      ? '<button type="button" class="dl-menu-item mode-menu-item" data-save="sql"><span class="mode-menu-item-label">SQL</span></button>'
+      : '<button type="button" class="dl-menu-item mode-menu-item" data-save="jpg"><span class="mode-menu-item-label">JPG</span></button>') +
+    '<button type="button" class="dl-menu-item mode-menu-item" data-save="pdf"><span class="mode-menu-item-label">PDF</span></button>' +
+    (dictActive ? '<button type="button" class="dl-menu-item mode-menu-item" data-save="xlsx"><span class="mode-menu-item-label">XLSX</span></button>' : '') + '</div>';
   modeMenuPanel.innerHTML = baseHtml + '<hr class="dl-menu-divider">' + extraHtml + saveHtml;
 }
 function closeModeMenu(){
