@@ -3575,6 +3575,7 @@ function attachNodeHandlers(g, node){
     });
     var startClient = { x:e.clientX, y:e.clientY };
     var moved = false;
+    var axisLock = null; // "h" | "v" enquanto o Shift está pressionado durante o arraste
     var pointerId = e.pointerId;
     // Os handlers de arraste ficam no "document" (em vez de usar setPointerCapture no
     // próprio elemento) porque, logo após um laço de seleção (marquee, que captura o
@@ -3587,6 +3588,15 @@ function attachNodeHandlers(g, node){
       if (ev.pointerId !== pointerId) return;
       var dx = ev.clientX - startClient.x, dy = ev.clientY - startClient.y;
       if (!moved && Math.hypot(dx,dy) > 4) moved = true;
+      // Pedido do usuário: com Shift pressionado, o movimento fica restrito à direção puxada
+      // (horizontal ou vertical). A direção é travada assim que o ponteiro se afasta um pouco e
+      // vale até soltar o Shift.
+      if (ev.shiftKey){
+        if (!axisLock && Math.hypot(dx,dy) > 8) axisLock = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
+        if (axisLock === "h") dy = 0;
+        else if (axisLock === "v") dx = 0;
+        else { dx = 0; dy = 0; }
+      } else axisLock = null;
       if (moved && !connectMode){
         var svgDx = dx / stageScale().sc;
         var svgDy = dy / stageScale().sc;
@@ -5112,7 +5122,7 @@ function showAttributeAlignMenu(entity, opts){
     '<line x1="4" y1="11" x2="12" y2="11"/></svg>';
   // Atalhos exibidos à direita (só os de alinhamento têm; Ctrl+AE/AD/AC/AB funcionam com uma
   // entidade/relacionamento único selecionado).
-  var ITEM_SHORTCUTS = { left: "Ctrl+AE", right: "Ctrl+AD", top: "Ctrl+AC", bottom: "Ctrl+AB", "layout-v": "Ctrl+AV", "layout-h": "Ctrl+AH", "select-all": "Ctrl+Alt+S" };
+  var ITEM_SHORTCUTS = { left: "Ctrl+AE", right: "Ctrl+AD", top: "Ctrl+AC", bottom: "Ctrl+AB", "layout-v": "Ctrl+AV", "layout-h": "Ctrl+AH", "select-all": "Ctrl+A" };
   function itemHtml(key, title, desc, iconSvg){
     var sc = ITEM_SHORTCUTS[key] ? '<span class="ctx-shortcut">' + ITEM_SHORTCUTS[key] + '</span>' : '';
     return '<button class="dl-menu-item" data-a="' + key + '">' + iconSvg +
@@ -5799,6 +5809,9 @@ document.addEventListener("keydown", function(e){
     // Ctrl+A sempre abre a espera pela segunda letra fora do modelo físico.
     if (alignShortcutTarget || alignLayoutOk || (!physicalActive && !dictActive)){
       e.preventDefault();
+      // Pedido do usuário: Ctrl+A seleciona todos os objetos na hora (sem uma única entidade/
+      // relacionamento selecionado). A espera abaixo continua armada para Ctrl+AV / AH / AJ.
+      if (!alignShortcutTarget && !physicalActive && !dictActive && !pendingAdd && !connectMode) selectAllObjects();
       // Com todos os objetos selecionados, Ctrl+AV / Ctrl+AH aplicam o alinhamento vertical /
       // horizontal do modelo inteiro (layoutWholeModel); com um só elemento, valem E/D/C/B.
       alignShortcutPending = {
@@ -5806,9 +5819,6 @@ document.addEventListener("keydown", function(e){
         timer: setTimeout(function(){
           alignShortcutPending = null;
           if (alignShortcutTarget) applyAttributeAlignCycleShortcut(alignShortcutTarget);
-          // Pedido do usuário: Ctrl+A sozinho (sem uma segunda letra H/V/J/E/D/C/B) e sem uma única
-          // entidade/relacionamento selecionado seleciona todos os objetos do modelo.
-          else if (!physicalActive && !dictActive && !pendingAdd && !connectMode) selectAllObjects();
         }, 700)
       };
     }
@@ -5818,10 +5828,6 @@ document.addEventListener("keydown", function(e){
     // para as cardinalidades continuarem visíveis (ver CHAIN_GAP / layoutModelPart).
     e.preventDefault(); // também evita o atalho do navegador (foco na barra de endereço)
     if (!physicalActive && !dictActive && !pendingAdd && !connectMode) layoutKeepingDirections();
-  } else if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.code === "KeyS" && !inField){
-    // Ctrl+Alt+S seleciona todos os objetos do modelo (pedido do usuário).
-    e.preventDefault();
-    if (!physicalActive && !dictActive) selectAllObjects();
   } else if (isDictFollowup){
     // Ctrl+DD: vai para o Dicionário de Dados (item "Dicionário de Dados" do menu de modelos) --
     // abre o que já existe (editado/salvo) e só gera na primeira vez, sem sobrescrever edições.
@@ -9199,8 +9205,7 @@ var SHORTCUT_HELP = [
   ]},
   { title: "Edição de elementos", rows: [
     [["Delete", "Backspace"], "Exclui os elementos ou conexões selecionados."],
-    [["Ctrl+A"], "Seleciona todos os objetos do modelo (conceitual ou lógico), cerca de 0,7 s depois, se nenhuma segunda letra for apertada. Com uma única entidade ou relacionamento selecionado, o Ctrl+A segue como início dos atalhos de alinhamento."],
-    [["Ctrl+Alt+S"], "Seleciona todos os objetos do modelo na hora (S de \"Selecionar\")."],
+    [["Ctrl+A"], "Seleciona todos os objetos do modelo (conceitual ou lógico) na hora. Com uma única entidade ou relacionamento selecionado, o Ctrl+A segue como início dos atalhos de alinhamento (E/D/C/B)."],
     [["Ctrl+C"], "Copia os elementos selecionados."],
     [["Ctrl+V"], "Cola os elementos copiados (no mesmo modelo em que foram copiados)."],
     [["Qualquer letra"], "Com um único elemento selecionado, começa a renomeá-lo: a letra substitui o nome e o cursor vai para o campo Nome."]
@@ -9222,6 +9227,7 @@ var SHORTCUT_HELP = [
     [["Roda do mouse"], "Aproxima ou afasta o zoom."],
     [["Espaço + arrastar", "Botão do meio"], "Move o quadro (panorâmica)."],
     [["Shift + arrastar"], "Num ponto vazio do quadro: seleciona em laço os elementos dentro do retângulo."],
+    [["Shift + arrastar"], "Sobre uma entidade, relacionamento ou tabela: move só na direção puxada (horizontal ou vertical)."],
     [["Shift + clique"], "Adiciona ou remove um elemento da seleção."],
     [["Alt + soltar/arrastar"], "Posiciona ou move sem encaixar na grade."],
     [["Ctrl + clique no botão"], "Nos botões da barra (inclusive Conectar): deixa a ferramenta fixa para usar várias vezes seguidas; clique de novo para desligar."],
