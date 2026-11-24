@@ -311,18 +311,27 @@
   .tbtn .ic-stroke{ stroke:var(--ink-soft); fill:none; }
   .tbtn.active .ic-stroke{ stroke:var(--accent-ink); }
   hr.tdiv{ border:none; border-top:1px solid var(--border-soft); margin:2px 0; }
-  .grid-size-ctl{ padding:4px 8px 2px; }
+  .grid-angle-row{ display:flex; align-items:flex-end; gap:4px; padding-right:4px; }
+  .grid-size-ctl{ padding:4px 0 2px 4px; flex:0 0 auto; }
+  .grid-size-ctl label{ white-space:nowrap; font-size:10px; }
+  .angle-col{ margin-left:auto; display:flex; flex-direction:column; align-items:flex-start; }
+  .angle45-ctl{ display:flex; align-items:center; gap:5px; padding:0 2px 5px; font-size:13px; cursor:pointer; user-select:none; }
+  .angle45-ctl input{ margin:0; cursor:pointer; }
   .grid-size-ctl label{
     display:block; font-size:11px; color:var(--ink-soft); margin-bottom:5px;
   }
   .grid-size-row{ display:flex; align-items:center; gap:5px; }
+  .grid-size-row{ gap:3px; }
+  .grid-size-row input{ width:36px; flex:0 0 36px; }
+  .angle45-ctl{ padding-right:0; font-size:12.5px; }
+  .angle-col .angle45-ctl:first-child{ padding-bottom:3px; }
   .grid-size-row button{
-    width:24px; height:24px; flex-shrink:0; border-radius:6px; border:1px solid var(--border);
+    width:22px; height:24px; flex-shrink:0; border-radius:6px; border:1px solid var(--border);
     background:var(--surface-2); color:var(--ink); font-size:14px; line-height:1; padding:0;
   }
   .grid-size-row button:hover{ background:var(--border-soft); }
   .grid-size-row input{
-    width:100%; min-width:0; text-align:center; border:1px solid var(--border); border-radius:6px;
+    width:100%; min-width:0; text-align:center; border:1px solid var(--border); border-radius:6px; padding-left:0; padding-right:0;
     background:var(--surface); color:var(--ink); padding:4px 2px; font-family:var(--font-mono); font-size:12.5px;
   }
   .grid-size-row input:focus{ outline:none; border-color:var(--select); }
@@ -1048,10 +1057,7 @@
     <hr class="tdiv">
     <div class="tgroup">
       <div class="tgroup-label">Alinhar</div>
-      <button class="tbtn" id="btnSnap" title="Ao arrastar, encaixa os elementos nos pontos da grade">
-        <svg viewBox="0 0 20 20"><circle class="ic-stroke" cx="3" cy="3" r="1"/><circle class="ic-stroke" cx="10" cy="3" r="1"/><circle class="ic-stroke" cx="17" cy="3" r="1"/><circle class="ic-stroke" cx="3" cy="10" r="1"/><circle class="ic-stroke" cx="17" cy="10" r="1"/><circle class="ic-stroke" cx="3" cy="17" r="1"/><circle class="ic-stroke" cx="17" cy="17" r="1"/><rect class="ic-stroke" x="6.5" y="6.5" width="7" height="7" rx="1.4"/></svg>
-        Alinhar à grade
-      </button>
+      <div class="grid-angle-row">
       <div class="grid-size-ctl">
         <label for="gridSizeInput">Espaçamento da grade</label>
         <div class="grid-size-row">
@@ -1059,6 +1065,15 @@
           <input type="number" id="gridSizeInput" min="2" max="100" step="2" value="26">
           <button type="button" id="gridSizeUp" title="Aumentar espaçamento">+</button>
         </div>
+      </div>
+      <div class="angle-col">
+      <label class="angle45-ctl" for="chkAngle15" title="Ao arrastar, o objeto só fica em posições em que a linha que o liga aos vizinhos forma ângulo múltiplo de 15º">
+        <input type="checkbox" id="chkAngle15"> <span>15º</span>
+      </label>
+      <label class="angle45-ctl" for="chkAngle45" title="Ao arrastar, o objeto só fica em posições em que a linha que o liga aos vizinhos forma ângulo múltiplo de 45º">
+        <input type="checkbox" id="chkAngle45"> <span>45º</span>
+      </label>
+      </div>
       </div>
     </div>
     <hr class="tdiv">
@@ -1327,7 +1342,9 @@ var pendingAdd = null;           // {type, weak, identifying, kind}
 var spaceHeld = false;
 var GRID_SIZE_MIN = 2, GRID_SIZE_MAX = 100;
 var GRID_SIZE = 26;              // espaçamento (em px do SVG) dos pontos do fundo e do encaixe ao arrastar
-var snapToGrid = true;
+var snapToGrid = true; // sempre ligado (Alt solta o encaixe durante o arraste)
+var angle45 = false; // caixa "45º": a ligação do objeto arrastado fica em múltiplos de 45º
+var angle15 = false; // caixa "15º": idem, em múltiplos de 15º (exclusiva com a de 45º)
 function snapValue(v){ return Math.round(v / GRID_SIZE) * GRID_SIZE; }
 
 var stageEl = document.getElementById("stage");
@@ -1364,7 +1381,7 @@ function setGridSize(v, skipSave){
 // para valerem em qualquer diagrama aberto depois, inclusive num navegador sem nada salvo ainda.
 function savePrefs(){
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ gridSize: GRID_SIZE, snapToGrid: snapToGrid, panelPinned: panelPinned, toolbarPinned: toolbarPinned, toolbarWidth: toolbarWidth }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ gridSize: GRID_SIZE, snapToGrid: snapToGrid, angle45: angle45, angle15: angle15, panelPinned: panelPinned, toolbarPinned: toolbarPinned, toolbarWidth: toolbarWidth }));
   } catch (err){ /* localStorage indisponível: preferências não persistem, mas o app segue funcionando */ }
 }
 function loadPrefs(){
@@ -1373,7 +1390,9 @@ function loadPrefs(){
     if (!raw) return;
     var p = JSON.parse(raw);
     if (p && isFinite(Number(p.gridSize))) GRID_SIZE = clamp(Math.round(Number(p.gridSize)), GRID_SIZE_MIN, GRID_SIZE_MAX);
-    if (p && typeof p.snapToGrid === "boolean") snapToGrid = p.snapToGrid;
+    // O encaixe na grade é permanente (ignora preferência antiga); só Alt solta temporariamente.
+    if (p && typeof p.angle45 === "boolean") angle45 = p.angle45;
+    if (p && typeof p.angle15 === "boolean") angle15 = p.angle15 && !angle45;
     if (p && typeof p.panelPinned === "boolean") panelPinned = p.panelPinned;
     if (p && typeof p.toolbarPinned === "boolean") toolbarPinned = p.toolbarPinned;
     if (p && isFinite(Number(p.toolbarWidth))) toolbarWidth = clamp(Math.round(Number(p.toolbarWidth)), TOOLBAR_W_MIN, TOOLBAR_W_MAX);
@@ -3515,6 +3534,39 @@ function trianglePoints(cx, cy, w, h){
 }
 
 /* ---------- interação: nós ---------- */
+// Caixa "45º": devolve o ponto mais próximo de "t" que deixa a linha até cada vizinho em múltiplo de 45º.
+// Prefere o cruzamento de duas dessas retas (vizinhos diferentes) quando ele está perto do ponteiro.
+function constrainTo45(nbrs, t, stepDeg){
+  stepDeg = stepDeg || 45;
+  var DIRS = [];
+  for (var kd = 0; kd < 180 / stepDeg; kd++){ var rad = kd * stepDeg * Math.PI / 180; DIRS.push([Math.cos(rad), Math.sin(rad)]); }
+  var lines = [];
+  nbrs.forEach(function(n, ni){ DIRS.forEach(function(d, di){ lines.push({ n: n, ni: ni, d: d, di: di }); }); });
+  var bestProj = null, bestProjDist = Infinity;
+  lines.forEach(function(L){
+    var k = (t.x - L.n.x) * L.d[0] + (t.y - L.n.y) * L.d[1];
+    var px = L.n.x + L.d[0] * k, py = L.n.y + L.d[1] * k;
+    var dist = Math.hypot(t.x - px, t.y - py);
+    if (dist < bestProjDist){ bestProjDist = dist; bestProj = { x: px, y: py }; }
+  });
+  var bestInt = null, bestIntDist = Infinity, INT_RANGE = 45;
+  for (var i = 0; i < lines.length; i++){
+    for (var j = i + 1; j < lines.length; j++){
+      var A = lines[i], B = lines[j];
+      if (A.ni === B.ni) continue;
+      var det = A.d[0] * (-B.d[1]) - A.d[1] * (-B.d[0]);
+      if (Math.abs(det) < 1e-6) continue; // paralelas
+      var rx = B.n.x - A.n.x, ry = B.n.y - A.n.y;
+      var ta = (rx * (-B.d[1]) - ry * (-B.d[0])) / det;
+      var ix = A.n.x + A.d[0] * ta, iy = A.n.y + A.d[1] * ta;
+      var dd = Math.hypot(t.x - ix, t.y - iy);
+      if (dd < bestIntDist){ bestIntDist = dd; bestInt = { x: ix, y: iy }; }
+    }
+  }
+  if (bestInt && bestIntDist <= INT_RANGE) return bestInt;
+  return bestProj;
+}
+
 function attachNodeHandlers(g, node){
   g.addEventListener("pointerdown", function(e){
     e.stopPropagation();
@@ -3576,6 +3628,14 @@ function attachNodeHandlers(g, node){
     var startClient = { x:e.clientX, y:e.clientY };
     var moved = false;
     var axisLock = null; // "h" | "v" enquanto o Shift está pressionado durante o arraste
+    // Vizinhos fixos do nó arrastado (ligados por aresta e que não se movem junto), para a caixa "45º".
+    var lineNbrs = [];
+    state.edges.forEach(function(ed){
+      var otherId = ed.from === node.id ? ed.to : (ed.to === node.id ? ed.from : null);
+      if (!otherId || groupIdSet[otherId]) return;
+      var on = getNode(otherId);
+      if (on && !lineNbrs.some(function(q){ return q.id === on.id; })) lineNbrs.push({ id: on.id, x: on.x, y: on.y });
+    });
     var pointerId = e.pointerId;
     // Os handlers de arraste ficam no "document" (em vez de usar setPointerCapture no
     // próprio elemento) porque, logo após um laço de seleção (marquee, que captura o
@@ -3600,10 +3660,19 @@ function attachNodeHandlers(g, node){
       if (moved && !connectMode){
         var svgDx = dx / stageScale().sc;
         var svgDy = dy / stageScale().sc;
+        // Caixa "45º": o nó arrastado só pode ficar em posições em que a linha que o liga a cada
+        // vizinho (que não está sendo movido junto) forme um ângulo múltiplo de 45º com ele. Se
+        // houver dois vizinhos, procura o ponto em que as duas linhas ficam em 45º ao mesmo tempo.
+        var angleLocked = false;
+        if ((angle45 || angle15) && lineNbrs.length && startPositions[node.id]){
+          var asp = startPositions[node.id];
+          var c45 = constrainTo45(lineNbrs, { x: asp.x + svgDx, y: asp.y + svgDy }, angle15 ? 15 : 45);
+          if (c45){ svgDx = c45.x - asp.x; svgDy = c45.y - asp.y; angleLocked = true; }
+        }
         // Encaixa na grade pela posição do nó "âncora" (o que foi clicado) e aplica o mesmo
         // deslocamento (já encaixado) a todo o grupo, preservando as posições relativas entre
         // os elementos selecionados. Segurar Alt desativa o encaixe temporariamente.
-        if (snapToGrid && !ev.altKey){
+        if (snapToGrid && !ev.altKey && !angleLocked){
           var anchorSp = startPositions[node.id];
           if (anchorSp){
             svgDx = snapValue(anchorSp.x + svgDx) - anchorSp.x;
@@ -5702,12 +5771,24 @@ document.getElementById("btnAddFkColumn").addEventListener("click", function(){
   render();
 });
 
-document.getElementById("btnSnap").addEventListener("click", function(){
-  snapToGrid = !snapToGrid;
+var chkAngle45 = document.getElementById("chkAngle45");
+var chkAngle15 = document.getElementById("chkAngle15");
+chkAngle45.checked = angle45;
+chkAngle15.checked = angle15;
+// As caixas 15º e 45º são exclusivas: marcar uma desmarca a outra.
+chkAngle45.addEventListener("change", function(){
+  angle45 = chkAngle45.checked;
+  if (angle45){ angle15 = false; chkAngle15.checked = false; }
   savePrefs();
-  updateToolbarActive();
-  showToast(snapToGrid ? "Encaixe na grade ativado. Segure Alt para movimentos livres." : "Encaixe na grade desativado.");
+  showToast(angle45 ? "45º ativado: as ligações do objeto arrastado ficam em múltiplos de 45º." : "45º desativado.");
 });
+chkAngle15.addEventListener("change", function(){
+  angle15 = chkAngle15.checked;
+  if (angle15){ angle45 = false; chkAngle45.checked = false; }
+  savePrefs();
+  showToast(angle15 ? "15º ativado: as ligações do objeto arrastado ficam em múltiplos de 15º." : "15º desativado.");
+});
+
 
 gridSizeInput.addEventListener("change", function(){ setGridSize(gridSizeInput.value); });
 gridSizeInput.addEventListener("keydown", function(e){ if (e.key === "Enter") gridSizeInput.blur(); });
@@ -5900,7 +5981,6 @@ document.addEventListener("keydown", function(e){
 
 function updateToolbarActive(){
   document.getElementById("btnConnect").classList.toggle("active", connectMode);
-  document.getElementById("btnSnap").classList.toggle("active", snapToGrid);
   document.querySelectorAll(".tbtn[data-add]").forEach(function(btn){
     var match = pendingAdd && btn.getAttribute("data-add") === pendingAdd.type &&
       (pendingAdd.type !== "entity" || (btn.getAttribute("data-weak")==="1") === !!pendingAdd.weak) &&
@@ -6483,7 +6563,7 @@ function updatePanel(){
       '<p>Selecione uma entidade, relacionamento, atributo, generalização ou conexão no quadro para editar seus detalhes aqui.</p>' +
       '<p>Use os botões à esquerda para adicionar elementos e "Conectar" para ligá-los.</p>' +
       '<p>Dica: arraste um laço ao redor de vários elementos (ou Shift+clique) para selecioná-los — depois é só arrastar um deles para mover todos juntos, ou excluir todos de uma vez.</p>' +
-      '<p>Dica: com "Alinhar à grade" ativado (botão na barra à esquerda), os elementos encaixam nos pontos da grade ao arrastar. Segure Alt para mover livremente sem encaixar.</p>' +
+      '<p>Dica: os elementos encaixam nos pontos da grade ao arrastar. Segure Alt para mover livremente sem encaixar.</p>' +
       '<p>Dica: segure Ctrl (ou Cmd no Mac) ao clicar num botão da barra à esquerda, como "Entidade", "Atributo" ou "Conectar", para "fixar" a ferramenta e incluir vários elementos seguidos, sem precisar clicar no botão de novo a cada um.</p>' +
       modeShortcutHintHtml() +
       '</div>';
@@ -9227,6 +9307,7 @@ var SHORTCUT_HELP = [
     [["Roda do mouse"], "Aproxima ou afasta o zoom."],
     [["Espaço + arrastar", "Botão do meio"], "Move o quadro (panorâmica)."],
     [["Shift + arrastar"], "Num ponto vazio do quadro: seleciona em laço os elementos dentro do retângulo."],
+    [["Caixas 15º / 45º"], "Na barra lateral (Alinhar), exclusivas entre si: ao arrastar, a linha que liga o objeto aos vizinhos fica sempre em múltiplos de 15º (0º, 15º, 30º...) ou de 45º (0º, 45º, 90º...)."],
     [["Shift + arrastar"], "Sobre uma entidade, relacionamento ou tabela: move só na direção puxada (horizontal ou vertical)."],
     [["Shift + clique"], "Adiciona ou remove um elemento da seleção."],
     [["Alt + soltar/arrastar"], "Posiciona ou move sem encaixar na grade."],
