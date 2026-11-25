@@ -225,13 +225,20 @@
   /* Pedido do usuário: a janela de seleção de modelo abre alinhada à esquerda do botão (o botão
      fica no canto superior esquerdo), em vez de alinhada à direita como os demais .dl-menu. */
   .mode-menu{ width:250px; left:0; right:auto; }
+  .cf-line{ stroke:var(--ink); stroke-width:1.5; fill:none; stroke-linecap:round; pointer-events:none; }
+  .cf-circle{ stroke:var(--ink); stroke-width:1.5; fill:var(--canvas-bg, var(--bg)); pointer-events:none; }
+  .stage-ctx-notation .dl-menu-caret-right{ flex:none; }
+  .stage-ctx-notation[aria-expanded="true"] .dl-menu-caret-right{ transform:rotate(90deg); }
+  .stage-ctx-notationlist .mode-menu-item{ padding-left:10px; gap:6px; }
+  .stage-ctx-notationlist .mode-menu-item, .stage-ctx-themelist .mode-menu-item{ justify-content:flex-start; text-align:left; }
+  .stage-ctx-notationlist .mode-menu-item-label, .stage-ctx-themelist .mode-menu-item-label{ flex:1; text-align:left; }
   .stage-ctx-themes .dl-menu-caret-right{ flex:none; }
   .stage-ctx-themes[aria-expanded="true"] .dl-menu-caret-right{ transform:rotate(90deg); }
   .stage-ctx-themelist .mode-menu-item{ padding-left:10px; gap:6px; }
-  .theme-check{ width:12px; flex:none; font-size:12px; text-align:center; }
+  .dl-menu-item .theme-check{ width:14px; flex:0 0 14px; font-size:12px; text-align:center; display:block; }
   .theme-dot{ width:14px; height:14px; border-radius:50%; flex:none; display:inline-block; border:1px solid var(--border); }
   .theme-dot-default{ background:var(--bg); }
-  .stage-ctx-menu{ position:fixed; right:auto; top:auto; width:230px; z-index:600; }
+  .stage-ctx-menu{ position:fixed; right:auto; top:auto; width:310px; z-index:600; }
 
   .mode-menu-item{ align-items:center; font-size:13px; justify-content:space-between; gap:10px; }
   .mode-menu-item.active{ background:var(--accent-fill); color:var(--accent-ink); font-weight:600; }
@@ -3255,6 +3262,61 @@ function participationLabelSpots(pts, entityAtStart, a, b, geo){
   return { pill: pill, role: role };
 }
 
+// ---------- notação das cardinalidades: Peter Chen (mín,máx) ou Engenharia da Informação (pé de galinha) ----------
+var CARD_NOTATION_KEY = "estudioDER.cardNotation.v1";
+var cardNotation = "chen"; // "chen" | "ie"
+try { if (localStorage.getItem(CARD_NOTATION_KEY) === "ie") cardNotation = "ie"; } catch (e){}
+function setCardNotation(v){
+  cardNotation = v === "ie" ? "ie" : "chen";
+  try { localStorage.setItem(CARD_NOTATION_KEY, cardNotation); } catch (e){}
+  render();
+}
+// Desenha, na ponta "tip" de uma ligação (u = vetor unitário apontando da ponta para dentro da linha),
+// os símbolos da Engenharia da Informação para (min,max): máximo N = pé de galinha, máximo 1 = traço;
+// mínimo 0 = círculo, mínimo 1 = traço.
+function appendCrowFootSymbol(group, tip, u, min, max){
+  var nx = -u.y, ny = u.x;
+  function P(d, o){ return { x: tip.x + u.x * d + nx * (o || 0), y: tip.y + u.y * d + ny * (o || 0) }; }
+  function seg(p, q){ group.appendChild(svgEl("line", { class:"cf-line", x1:p.x, y1:p.y, x2:q.x, y2:q.y })); }
+  var many = String(max).toUpperCase() !== "1";
+  var optional = String(min) === "0";
+  var next;
+  if (many){
+    var apex = P(11, 0);
+    seg(apex, P(0, 7)); seg(apex, P(0, 0)); seg(apex, P(0, -7));
+    next = 17;
+  } else {
+    seg(P(6, 7), P(6, -7));
+    next = 12;
+  }
+  if (optional){
+    var c = P(next + 3, 0);
+    group.appendChild(svgEl("circle", { class:"cf-circle", cx:c.x, cy:c.y, r:4 }));
+  } else {
+    seg(P(next, 7), P(next, -7));
+  }
+}
+function unitAway(from, toward){
+  var dx = toward.x - from.x, dy = toward.y - from.y, l = Math.hypot(dx, dy) || 1;
+  return { x: dx / l, y: dy / l };
+}
+// Monta (ou refaz) os símbolos de pé de galinha de uma ligação.
+function fillCrowFootSymbols(group, edge, pts, a){
+  while (group.firstChild) group.removeChild(group.firstChild);
+  if (pts.length < 2) return;
+  var first = pts[0], second = pts[1], last = pts[pts.length - 1], beforeLast = pts[pts.length - 2];
+  if (edge.kind === "participation"){
+    // (mín,máx) da entidade: o símbolo fica junto da própria entidade.
+    if (a.type === "entity") appendCrowFootSymbol(group, first, unitAway(first, second), edge.min || "0", edge.max || "N");
+    else appendCrowFootSymbol(group, last, unitAway(last, beforeLast), edge.min || "0", edge.max || "N");
+  } else if (edge.kind === "fk"){
+    // Cada tabela mostra a própria cardinalidade junto de si: a que tem a chave estrangeira (início da
+    // ligação) mostra cardChild; a referenciada (fim) mostra cardParent.
+    if (edge.cardChild) appendCrowFootSymbol(group, first, unitAway(first, second), edge.cardChild.min || "0", edge.cardChild.max || "N");
+    if (edge.cardParent) appendCrowFootSymbol(group, last, unitAway(last, beforeLast), edge.cardParent.min || "0", edge.cardParent.max || "N");
+  }
+}
+
 function renderEdge(edge, dimsById){
   var a = getNode(edge.from), b = getNode(edge.to);
   if (!a || !b) return;
@@ -3281,19 +3343,26 @@ function renderEdge(edge, dimsById){
   }
   hit.addEventListener("pointerdown", onEdgeSelect);
 
-  var bgEl = null, txtEl = null, rtxtEl = null;
+  var bgEl = null, txtEl = null, rtxtEl = null, cfEl = null;
+  if (cardNotation === "ie" && (edge.kind === "participation" || edge.kind === "fk")){
+    cfEl = svgEl("g", {});
+    g.appendChild(cfEl);
+    fillCrowFootSymbols(cfEl, edge, pts, a);
+  }
   if (edge.kind === "participation"){
     var spots = participationLabelSpots(pts, a.type === "entity", a, b, geo);
     var px = spots.pill.x, py = spots.pill.y;
-    var label = "(" + (edge.min || "0") + "," + (edge.max || "N") + ")";
-    var tw = Math.max(30, measureTextWidth(label) + 10);
-    var bg = svgEl("rect", { class:"card-pill-bg", x:px-tw/2, y:py-9, width:tw, height:18, rx:4 });
-    var txt = svgEl("text", { class:"card-pill-text", x:px, y:py+1 });
-    txt.textContent = label;
-    g.appendChild(bg); g.appendChild(txt);
-    bg.addEventListener("pointerdown", onEdgeSelect);
-    txt.style.pointerEvents = "none";
-    bgEl = bg; txtEl = txt;
+    if (cardNotation !== "ie"){
+      var label = "(" + (edge.min || "0") + "," + (edge.max || "N") + ")";
+      var tw = Math.max(30, measureTextWidth(label) + 10);
+      var bg = svgEl("rect", { class:"card-pill-bg", x:px-tw/2, y:py-9, width:tw, height:18, rx:4 });
+      var txt = svgEl("text", { class:"card-pill-text", x:px, y:py+1 });
+      txt.textContent = label;
+      g.appendChild(bg); g.appendChild(txt);
+      bg.addEventListener("pointerdown", onEdgeSelect);
+      txt.style.pointerEvents = "none";
+      bgEl = bg; txtEl = txt;
+    }
 
     if (edge.role){
       var rtxt = svgEl("text", { class:"role-text", x:spots.role.x, y:spots.role.y });
@@ -3309,7 +3378,7 @@ function renderEdge(edge, dimsById){
     // das colunas FK nas linhas), apenas, quando a conversão trouxe a cardinalidade do
     // relacionamento original (ver convertConceptualToLogical), uma pílula (min,max) em cada
     // ponta — a mesma que aparecia junto de cada entidade no diagrama conceitual.
-    if (edge.cardChild){
+    if (edge.cardChild && cardNotation !== "ie"){
       var cLabel = "(" + (edge.cardChild.min || "0") + "," + (edge.cardChild.max || "N") + ")";
       var cp = pointAlongPolyline(pts, 0.25);
       var ctw = Math.max(30, measureTextWidth(cLabel) + 10);
@@ -3321,7 +3390,7 @@ function renderEdge(edge, dimsById){
       ctxt.style.pointerEvents = "none";
       bgChildEl = cbg; txtChildEl = ctxt;
     }
-    if (edge.cardParent){
+    if (edge.cardParent && cardNotation !== "ie"){
       var pLabel = "(" + (edge.cardParent.min || "0") + "," + (edge.cardParent.max || "N") + ")";
       var pp = pointAlongPolyline(pts, 0.75);
       var ptw = Math.max(30, measureTextWidth(pLabel) + 10);
@@ -3335,7 +3404,7 @@ function renderEdge(edge, dimsById){
     }
   }
 
-  edgeDom[edge.id] = { line:line, hit:hit, bg:bgEl, txt:txtEl, rtxt:rtxtEl, bgChild:bgChildEl, txtChild:txtChildEl, bgParent:bgParentEl, txtParent:txtParentEl };
+  edgeDom[edge.id] = { line:line, hit:hit, bg:bgEl, txt:txtEl, rtxt:rtxtEl, bgChild:bgChildEl, txtChild:txtChildEl, bgParent:bgParentEl, txtParent:txtParentEl, cf:cfEl };
   edgesGroup.appendChild(g);
 }
 
@@ -3356,6 +3425,7 @@ function updateConnectedEdgeDom(nodeId){
     var ptsAttr = polylinePointsAttr(pts);
     refs.line.setAttribute("points", ptsAttr);
     refs.hit.setAttribute("points", ptsAttr);
+    if (refs.cf) fillCrowFootSymbols(refs.cf, edge, pts, a);
     if (edge.kind === "participation"){
       var spots = participationLabelSpots(pts, a.type === "entity", a, b, geo);
       if (refs.bg && refs.txt){
@@ -5329,6 +5399,8 @@ function showStageContextMenu(x, y){
     '<hr class="dl-menu-divider">' +
     '<button class="dl-menu-item mode-menu-item stage-ctx-themes" role="menuitem" aria-haspopup="true" aria-expanded="false" data-a="themes"><span class="mode-menu-item-label">Cor de fundo</span><svg class="dl-menu-caret-right" viewBox="0 0 6 10" width="6" height="10"><path d="M1 1l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
     '<div class="stage-ctx-themelist" hidden></div>' +
+    '<button class="dl-menu-item mode-menu-item stage-ctx-notation" role="menuitem" aria-haspopup="true" aria-expanded="false" data-a="notation"><span class="mode-menu-item-label">Notação do diagrama</span><svg class="dl-menu-caret-right" viewBox="0 0 6 10" width="6" height="10"><path d="M1 1l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+    '<div class="stage-ctx-notationlist" hidden></div>' +
     '<hr class="dl-menu-divider">' +
     '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="about"><span class="mode-menu-item-label">Sobre</span></button>' +
     '</div>';
@@ -5372,6 +5444,29 @@ function showStageContextMenu(x, y){
       var top = parseFloat(menu.style.top) || 0;
       if (top + mh > window.innerHeight - 4) menu.style.top = Math.max(4, window.innerHeight - mh - 4) + "px";
     }
+  });
+  var notBtn = menu.querySelector('[data-a="notation"]');
+  var notList = menu.querySelector(".stage-ctx-notationlist");
+  var NOTATIONS = [["chen", "Peter Chen (mín,máx)"], ["ie", "Engenharia da Informação (Crow's Foot)"]];
+  notBtn.addEventListener("click", function(e){
+    e.stopPropagation();
+    notList.hidden = !notList.hidden;
+    notBtn.setAttribute("aria-expanded", notList.hidden ? "false" : "true");
+    if (!notList.hidden){
+      notList.innerHTML = NOTATIONS.map(function(n){
+        return '<button class="dl-menu-item mode-menu-item" role="menuitemradio" aria-checked="' + (n[0] === cardNotation) + '" data-not="' + n[0] + '">' +
+          '<span class="theme-check">' + (n[0] === cardNotation ? "✓" : "") + '</span><span class="mode-menu-item-label">' + n[1] + '</span></button>';
+      }).join("");
+      var mh = menu.offsetHeight, top = parseFloat(menu.style.top) || 0;
+      if (top + mh > window.innerHeight - 4) menu.style.top = Math.max(4, window.innerHeight - mh - 4) + "px";
+    }
+  });
+  notList.addEventListener("click", function(e){
+    var b = e.target.closest("[data-not]");
+    if (!b) return;
+    e.stopPropagation();
+    closeStageContextMenu();
+    setCardNotation(b.getAttribute("data-not"));
   });
   themeList.addEventListener("click", function(e){
     var b = e.target.closest("[data-pal]");
@@ -9391,6 +9486,7 @@ var SHORTCUT_HELP = [
     [["Roda do mouse"], "Aproxima ou afasta o zoom."],
     [["Espaço + arrastar", "Botão do meio"], "Move o quadro (panorâmica)."],
     [["Shift + arrastar"], "Num ponto vazio do quadro: seleciona em laço os elementos dentro do retângulo."],
+    [["Botão direito (área vazia)"], "Notação do diagrama: Peter Chen (mín,máx) ou Engenharia da Informação (Crow's Foot), nos modelos Conceitual e Lógico."],
     [["Caixas 15º / 45º"], "Na barra lateral (Alinhar), exclusivas entre si: ao arrastar, a linha que liga o objeto aos vizinhos fica sempre em múltiplos de 15º (0º, 15º, 30º...) ou de 45º (0º, 45º, 90º...)."],
     [["Shift + arrastar"], "Sobre uma entidade, relacionamento ou tabela: move só na direção puxada (horizontal ou vertical)."],
     [["Shift + clique"], "Adiciona ou remove um elemento da seleção."],
