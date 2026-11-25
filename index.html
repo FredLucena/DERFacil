@@ -225,6 +225,12 @@
   /* Pedido do usuário: a janela de seleção de modelo abre alinhada à esquerda do botão (o botão
      fica no canto superior esquerdo), em vez de alinhada à direita como os demais .dl-menu. */
   .mode-menu{ width:250px; left:0; right:auto; }
+  .stage-ctx-themes .dl-menu-caret-right{ flex:none; }
+  .stage-ctx-themes[aria-expanded="true"] .dl-menu-caret-right{ transform:rotate(90deg); }
+  .stage-ctx-themelist .mode-menu-item{ padding-left:10px; gap:6px; }
+  .theme-check{ width:12px; flex:none; font-size:12px; text-align:center; }
+  .theme-dot{ width:14px; height:14px; border-radius:50%; flex:none; display:inline-block; border:1px solid var(--border); }
+  .theme-dot-default{ background:var(--bg); }
   .stage-ctx-menu{ position:fixed; right:auto; top:auto; width:230px; z-index:600; }
 
   .mode-menu-item{ align-items:center; font-size:13px; justify-content:space-between; gap:10px; }
@@ -340,7 +346,7 @@
   .grid-size-row input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
   .grid-size-row input[type=number]{ -moz-appearance:textfield; }
 
-  .canvas-wrap{ position:relative; flex:1; overflow:hidden; background:var(--bg); }
+  .canvas-wrap{ position:relative; flex:1; overflow:hidden; background:var(--canvas-bg, var(--bg)); }
   svg#stage{ width:100%; height:100%; display:block; user-select:none; -webkit-user-select:none; cursor:grab; touch-action:none; }
   svg#stage:active{ cursor:grabbing; }
   svg#stage.mode-connect{ cursor:crosshair; }
@@ -1607,8 +1613,43 @@ function computeInitialDarkTheme(){
     return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   } catch (err){ return false; }
 }
+// ---------- cor de fundo do quadro (menu do botão direito) ----------
+// Só o fundo do quadro muda; as cores dos objetos continuam as do tema claro/escuro. Cada opção tem
+// uma versão para o modo claro e outra para o escuro. "Padrão" não aplica nada (vale o CSS original).
+var BGCOLOR_KEY = "estudioDER.bgcolor.v1";
+var BG_COLORS = [
+  { id: "padrao", name: "Padrão" },
+  { id: "branco", name: "Branco", light: "#ffffff", dark: "#0c0e11" },
+  { id: "azul",   name: "Azul",    light: "hsl(210,60%,93%)", dark: "hsl(210,28%,11%)" },
+  { id: "verde",  name: "Verde",   light: "hsl(140,38%,92%)", dark: "hsl(145,22%,10%)" },
+  { id: "rosa",   name: "Rosa",    light: "hsl(345,60%,94%)", dark: "hsl(345,22%,11%)" },
+  { id: "lilas",  name: "Lilás",   light: "hsl(268,50%,94%)", dark: "hsl(268,22%,12%)" },
+  { id: "cinza",  name: "Cinza",   light: "hsl(0,0%,90%)",    dark: "hsl(0,0%,14%)" }
+];
+var currentBgColor = "padrao";
+try {
+  var savedBg = localStorage.getItem(BGCOLOR_KEY);
+  if (savedBg && BG_COLORS.some(function(q){ return q.id === savedBg; })) currentBgColor = savedBg;
+  localStorage.removeItem("estudioDER.palette.v1"); // versão anterior (temas de cores completos)
+} catch (e){}
+function bgColorOf(opt, dark){ return opt.light ? (dark ? opt.dark : opt.light) : null; }
+function applyBgColor(){
+  var root = document.documentElement;
+  var opt = BG_COLORS.filter(function(q){ return q.id === currentBgColor; })[0];
+  var col = opt && bgColorOf(opt, isDarkTheme);
+  ["--canvas-bg", "--bg-dot"].forEach(function(v){ root.style.removeProperty(v); });
+  if (!col) return;
+  root.style.setProperty("--canvas-bg", col);
+  root.style.setProperty("--bg-dot", isDarkTheme ? "rgba(235,235,235,0.12)" : "rgba(30,30,30,0.14)");
+}
+function setBgColor(id){
+  currentBgColor = id;
+  try { localStorage.setItem(BGCOLOR_KEY, id); } catch (e){}
+  applyBgColor();
+}
 function applyTheme(){
   document.documentElement.setAttribute("data-theme", isDarkTheme ? "dark" : "light");
+  applyBgColor();
   var btn = document.getElementById("btnTheme");
   if (!btn) return;
   btn.innerHTML = isDarkTheme
@@ -5286,6 +5327,9 @@ function showStageContextMenu(x, y){
     '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="align"><span class="mode-menu-item-label">Alinhar objetos</span><span class="mode-menu-item-shortcut">' + mod + '+L</span></button>' +
     '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="fit"><span class="mode-menu-item-label">Ajustar tela</span><span class="mode-menu-item-shortcut">' + mod + '+AJ</span></button>' +
     '<hr class="dl-menu-divider">' +
+    '<button class="dl-menu-item mode-menu-item stage-ctx-themes" role="menuitem" aria-haspopup="true" aria-expanded="false" data-a="themes"><span class="mode-menu-item-label">Cor de fundo</span><svg class="dl-menu-caret-right" viewBox="0 0 6 10" width="6" height="10"><path d="M1 1l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+    '<div class="stage-ctx-themelist" hidden></div>' +
+    '<hr class="dl-menu-divider">' +
     '<button class="dl-menu-item mode-menu-item" role="menuitem" data-a="about"><span class="mode-menu-item-label">Sobre</span></button>' +
     '</div>';
   document.body.appendChild(menu);
@@ -5305,6 +5349,36 @@ function showStageContextMenu(x, y){
   menu.querySelector('[data-a="about"]').addEventListener("click", function(){
     closeStageContextMenu();
     showAboutModal();
+  });
+  var themesBtn = menu.querySelector('[data-a="themes"]');
+  var themeList = menu.querySelector(".stage-ctx-themelist");
+  function fillThemeList(){
+    themeList.innerHTML = BG_COLORS.map(function(pl){
+      var col = bgColorOf(pl, isDarkTheme);
+      var dot = col ? '<i class="theme-dot" style="background:' + col + '"></i>'
+                    : '<i class="theme-dot theme-dot-default"></i>';
+      return '<button class="dl-menu-item mode-menu-item" role="menuitemradio" aria-checked="' + (pl.id === currentBgColor) + '" data-pal="' + pl.id + '">' +
+        '<span class="theme-check">' + (pl.id === currentBgColor ? "✓" : "") + '</span>' + dot +
+        '<span class="mode-menu-item-label">' + pl.name + '</span></button>';
+    }).join("");
+  }
+  themesBtn.addEventListener("click", function(e){
+    e.stopPropagation();
+    themeList.hidden = !themeList.hidden;
+    themesBtn.setAttribute("aria-expanded", themeList.hidden ? "false" : "true");
+    if (!themeList.hidden){
+      fillThemeList();
+      var mh = menu.offsetHeight;
+      var top = parseFloat(menu.style.top) || 0;
+      if (top + mh > window.innerHeight - 4) menu.style.top = Math.max(4, window.innerHeight - mh - 4) + "px";
+    }
+  });
+  themeList.addEventListener("click", function(e){
+    var b = e.target.closest("[data-pal]");
+    if (!b) return;
+    e.stopPropagation();
+    setBgColor(b.getAttribute("data-pal"));
+    closeStageContextMenu();
   });
   menu.querySelector('[data-a="fit"]').addEventListener("click", function(){
     closeStageContextMenu();
@@ -7971,7 +8045,7 @@ function projectFileBase(){
 
 // Extensão -> tipo MIME, usada só para sugerir o tipo certo na janela nativa "Salvar como"
 // (showSaveFilePicker, abaixo) -- não afeta os outros dois caminhos de download.
-var SAVE_PICKER_MIME_BY_EXT = { json:"application/json", jpg:"image/jpeg", jpeg:"image/jpeg", pdf:"application/pdf", html:"text/html", sql:"text/plain", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
+var SAVE_PICKER_MIME_BY_EXT = { json:"application/json", png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", pdf:"application/pdf", html:"text/html", sql:"text/plain", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
 
 // Abre a janela nativa "Salvar como" (showSaveFilePicker) o quanto antes -- ANTES de qualquer
 // trabalho assíncrono mais lento, como o fetch() que "Baixar DER Fácil" faz pra buscar uma cópia
@@ -8234,12 +8308,14 @@ function buildExportSvgMarkup(){
   styleEl.textContent = rootCss + "\n" + (pageStyleEl ? pageStyleEl.textContent : "");
   clone.insertBefore(styleEl, clone.firstChild);
 
-  var bgColor = rootStyles.getPropertyValue("--bg").trim() || "#ffffff";
-  var bgFill = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  bgFill.setAttribute("x", vx); bgFill.setAttribute("y", vy);
-  bgFill.setAttribute("width", vw); bgFill.setAttribute("height", vh);
-  bgFill.setAttribute("fill", bgColor);
-  clone.insertBefore(bgFill, styleEl.nextSibling);
+  var bgColor = rootStyles.getPropertyValue("--canvas-bg").trim() || rootStyles.getPropertyValue("--bg").trim() || "#ffffff";
+  if (!exportTransparentBg){
+    var bgFill = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bgFill.setAttribute("x", vx); bgFill.setAttribute("y", vy);
+    bgFill.setAttribute("width", vw); bgFill.setAttribute("height", vh);
+    bgFill.setAttribute("fill", bgColor);
+    clone.insertBefore(bgFill, styleEl.nextSibling);
+  }
 
   var xml = new XMLSerializer().serializeToString(clone);
   return { xml: xml, width: vw, height: vh, bgColor: bgColor };
@@ -8263,8 +8339,10 @@ function renderDiagramToCanvas(scale){
         var ctx = canvas.getContext("2d");
         // preenche o fundo antes de desenhar -- essencial para o JPG, que não tem canal
         // alfa (qualquer área "transparente" do SVG viraria preto sem isto).
-        ctx.fillStyle = built.bgColor;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (!exportTransparentBg){
+          ctx.fillStyle = built.bgColor;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         URL.revokeObjectURL(url);
         resolve(canvas);
@@ -8487,15 +8565,18 @@ async function exportDictionary(fmt){
   }
 }
 
+// true enquanto o PNG de fundo transparente é gerado (JPG e PDF não têm transparência: sempre fundo sólido)
+var exportTransparentBg = false;
 async function exportProjectImage(fmt){
   if (dictActive) return exportDictionary(fmt);
   if (physicalActive && !dictActive && (fmt === "sql" || fmt === "pdf")) return exportPhysicalSql(fmt);
   var filename = projectFileBase() + "." + fmt;
   var isPdf = fmt === "pdf";
+  var isPng = fmt === "png";
   var msgs = {
     saved: (isPdf ? "PDF baixado" : "Imagem baixada") + " como " + filename + ".",
     delivered: isPdf ? "PDF enviado." : "Imagem enviada.",
-    failed: "Não foi possível gerar o " + (isPdf ? "PDF" : "JPG") + " agora."
+    failed: "Não foi possível gerar o " + (isPdf ? "PDF" : (isPng ? "PNG" : "JPG")) + " agora."
   };
   // Abre a janela nativa "Salvar como" já no clique, antes de gerar a imagem/PDF (o PDF em
   // especial pode demorar, pois carrega uma biblioteca externa) -- ver o comentário de
@@ -8503,9 +8584,11 @@ async function exportProjectImage(fmt){
   var nativeWriter = await tryNativeSavePicker(filename);
   if (nativeWriter === SAVE_CANCELLED) return;
   try {
-    var canvas = await renderDiagramToCanvas(2);
+    exportTransparentBg = isPng;
+    var canvas;
+    try { canvas = await renderDiagramToCanvas(2); } finally { exportTransparentBg = false; }
     if (!isPdf){
-      var blob = await new Promise(function(resolve){ canvas.toBlob(resolve, "image/jpeg", 0.92); });
+      var blob = await new Promise(function(resolve){ isPng ? canvas.toBlob(resolve, "image/png") : canvas.toBlob(resolve, "image/jpeg", 0.92); });
       if (!blob) throw new Error("toBlob falhou");
       await downloadFile(filename, blob, msgs, nativeWriter);
     } else {
@@ -9068,7 +9151,8 @@ function renderModeMenuPanel(){
     '<div class="mode-menu-savesub" hidden>' +
     (physicalActive && !dictActive
       ? '<button type="button" class="dl-menu-item mode-menu-item" data-save="sql"><span class="mode-menu-item-label">SQL</span></button>'
-      : '<button type="button" class="dl-menu-item mode-menu-item" data-save="jpg"><span class="mode-menu-item-label">JPG</span></button>') +
+      : '<button type="button" class="dl-menu-item mode-menu-item" data-save="jpg"><span class="mode-menu-item-label">JPG (fundo sólido)</span></button>' +
+        (dictActive ? '' : '<button type="button" class="dl-menu-item mode-menu-item" data-save="png"><span class="mode-menu-item-label">PNG (fundo transparente)</span></button>')) +
     '<button type="button" class="dl-menu-item mode-menu-item" data-save="pdf"><span class="mode-menu-item-label">PDF</span></button>' +
     (dictActive ? '<button type="button" class="dl-menu-item mode-menu-item" data-save="xlsx"><span class="mode-menu-item-label">XLSX</span></button>' : '') + '</div>';
   modeMenuPanel.innerHTML = baseHtml + '<hr class="dl-menu-divider">' + extraHtml + saveHtml;
