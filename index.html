@@ -267,7 +267,7 @@
   main{ flex:1; display:flex; min-height:0; }
 
   aside.toolbar{
-    width:var(--toolbar-w, 190px); flex-shrink:0; background:var(--surface);
+    width:var(--toolbar-w, 220px); flex-shrink:0; background:var(--surface);
     border-right:1px solid var(--border);
     display:flex; flex-direction:column; min-height:0;
     transition:width .18s ease;
@@ -288,7 +288,7 @@
      ou selecionar um elemento no quadro a traz de volta (o :hover cobre o mouse; o JS remove a
      classe "collapsed" ao haver seleção). */
   aside.toolbar.collapsed{ width:14px; }
-  aside.toolbar.collapsed:hover{ width:var(--toolbar-w, 190px); }
+  aside.toolbar.collapsed:hover{ width:var(--toolbar-w, 220px); }
   .toolbar-inner{
     flex:1; min-height:0; overflow-y:auto;
     padding:14px 12px 24px; display:flex; flex-direction:column; gap:16px;
@@ -1371,7 +1371,8 @@ var panelPinned = true;
 var toolbarWrapEl = document.getElementById("toolbarWrap");
 var toolbarPinChk = document.getElementById("toolbarPinChk");
 var toolbarPinned = true;
-var TOOLBAR_W_DEFAULT = 190, TOOLBAR_W_MIN = 150, TOOLBAR_W_MAX = 420;
+// Largura padrão 220 px: "Sobre" e "F1 - Ajuda" ficam lado a lado mesmo com fontes mais largas.
+var TOOLBAR_W_DEFAULT = 220, TOOLBAR_W_OLD_DEFAULT = 190, TOOLBAR_W_MIN = 150, TOOLBAR_W_MAX = 420;
 var toolbarWidth = TOOLBAR_W_DEFAULT;   // largura da barra esquerda ajustada com o mouse (ver initToolbarResizer)
 var toastWrap = document.getElementById("toastWrap");
 var projectNameInput = document.getElementById("projectName");
@@ -1408,7 +1409,8 @@ function loadPrefs(){
     if (p && typeof p.angle15 === "boolean") angle15 = p.angle15 && !angle45;
     if (p && typeof p.panelPinned === "boolean") panelPinned = p.panelPinned;
     if (p && typeof p.toolbarPinned === "boolean") toolbarPinned = p.toolbarPinned;
-    if (p && isFinite(Number(p.toolbarWidth))) toolbarWidth = clamp(Math.round(Number(p.toolbarWidth)), TOOLBAR_W_MIN, TOOLBAR_W_MAX);
+    // Quem ainda tinha a largura padrão antiga (190) salva passa a usar a nova; larguras ajustadas à mão ficam.
+    if (p && isFinite(Number(p.toolbarWidth)) && Number(p.toolbarWidth) !== TOOLBAR_W_OLD_DEFAULT) toolbarWidth = clamp(Math.round(Number(p.toolbarWidth)), TOOLBAR_W_MIN, TOOLBAR_W_MAX);
   } catch (err){ /* ignora preferências corrompidas e usa os padrões */ }
 }
 
